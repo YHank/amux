@@ -1,0 +1,10 @@
+# Build output
+/amux
+/dist/
+*.test
+
+# OMC / Claude Code operational state
+.omc/
+
+# OS
+.DS_Store

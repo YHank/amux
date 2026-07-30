@@ -1,0 +1,46 @@
+# goreleaser v2 config. Run `goreleaser release --clean` on a tagged commit.
+# NOTE: update the module path and the brews.repository owner/name to your own
+# GitHub before publishing a Homebrew tap.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: amux
+    main: ./cmd/amux
+    binary: amux
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Uncomment and set your tap repo to publish a Homebrew formula automatically.
+# brews:
+#   - name: amux
+#     repository:
+#       owner: your-github-user
+#       name: homebrew-tap
+#     homepage: "https://github.com/your-github-user/amux"
+#     description: "Track AI agents across tmux sessions and background daemons"
+#     license: "MIT"
+#     test: |
+#       system "#{bin}/amux", "--version"
