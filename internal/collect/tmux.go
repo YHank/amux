@@ -119,6 +119,15 @@ func capturePane(target string, n int) []string {
 	return lines
 }
 
+// choicePromptScanLines bounds how many trailing lines are checked for the
+// choice-prompt footer. A genuine pending prompt is always the current bottom
+// of the screen — scanning the whole preview window instead risks matching
+// scrollback that merely mentions the phrase. This exact failure mode was
+// reproduced live: a conversation that was busy explaining this very
+// heuristic (quoting the marker text verbatim) scrolled that quote into a
+// monitored pane's history, and a whole-preview scan flagged it as pending.
+const choicePromptScanLines = 8
+
 // looksLikeChoicePrompt reports whether the captured pane content shows the
 // agent mid-question, blocked on the user picking one of several options —
 // e.g. Claude Code's AskUserQuestion UI:
@@ -136,7 +145,11 @@ func capturePane(target string, n int) []string {
 // conservative — dialects of this UI or other tools' own approval prompts that
 // phrase their footer differently won't be caught.
 func looksLikeChoicePrompt(lines []string) bool {
-	for _, l := range lines {
+	tail := lines
+	if len(tail) > choicePromptScanLines {
+		tail = tail[len(tail)-choicePromptScanLines:]
+	}
+	for _, l := range tail {
 		if strings.Contains(l, "Enter to select") && strings.Contains(l, "navigate") {
 			return true
 		}

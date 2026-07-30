@@ -149,6 +149,31 @@ func TestLooksLikeChoicePrompt(t *testing.T) {
 	}
 }
 
+func TestLooksLikeChoicePromptIgnoresScrollbackMentions(t *testing.T) {
+	// Reproduces a real false positive: the marker phrase appearing in old
+	// scrollback (e.g. prose that quotes it, or a past genuine prompt that has
+	// since scrolled up) must not count — only the current bottom of screen.
+	lines := make([]string, 0, 20)
+	lines = append(lines, "some earlier message that happens to quote the exact")
+	lines = append(lines, "footer text: Enter to select · ↑/↓ to navigate · Esc to cancel")
+	lines = append(lines, "")
+	for i := 0; i < 15; i++ {
+		lines = append(lines, "later, ordinary output line")
+	}
+	lines = append(lines, "❯ ")
+	lines = append(lines, "working normally, nothing pending")
+
+	if looksLikeChoicePrompt(lines) {
+		t.Error("marker text buried in scrollback (not the current bottom of screen) must not match")
+	}
+
+	// Sanity: the same marker at the actual bottom still matches.
+	lines[len(lines)-1] = "Enter to select · ↑/↓ to navigate · Esc to cancel"
+	if !looksLikeChoicePrompt(lines) {
+		t.Error("marker text at the current bottom of screen should still match")
+	}
+}
+
 func TestJobName(t *testing.T) {
 	if got := jobName(jobState{Name: "my-feature\t205"}, "abc"); got != "my-feature" {
 		t.Errorf("explicit name: got %q", got)
