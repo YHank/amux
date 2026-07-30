@@ -158,3 +158,78 @@ func TestComposeEnterWithEmptyTextDoesNotSend(t *testing.T) {
 		t.Error("enter should still exit compose mode with an empty draft")
 	}
 }
+
+// TestXNoLongerQuits guards the exact regression reported: x used to be an
+// alias for quit, which collided with its intended meaning (kill the
+// selected agent, mux-style). Only q/ctrl+c may quit.
+func TestXNoLongerQuits(t *testing.T) {
+	m := Model{snap: projSnap(mkAgent("a", collect.LifeWorking))}
+	m.rebuildRows()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if next.(Model).quit || cmd != nil {
+		t.Error("x must not quit the app")
+	}
+}
+
+// TestKillOnlyForInteractive verifies x is a no-op on a background agent —
+// there's no verified-safe way to kill a headless job from outside amux —
+// and arms the confirmation prompt for an interactive one without killing yet.
+func TestKillOnlyForInteractive(t *testing.T) {
+	bg := collect.Agent{ID: "b1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/p", Name: "b1"}
+	m := Model{snap: projSnap(bg)}
+	m.rebuildRows()
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if next.(Model).confirmingKill || cmd != nil {
+		t.Error("x should not arm a kill confirmation for a background agent")
+	}
+
+	inter := collect.Agent{ID: "i1", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "i1", TmuxTarget: "sess:0.0"}
+	m = Model{snap: projSnap(inter)}
+	m.rebuildRows()
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	mm := next.(Model)
+	if !mm.confirmingKill || mm.killTarget != "sess:0.0" {
+		t.Fatal("x should arm a kill confirmation for an interactive agent")
+	}
+	if cmd != nil {
+		t.Error("arming the confirmation must not kill anything yet")
+	}
+}
+
+// TestKillConfirmRequiresY verifies only y/Y actually kills; every other key,
+// including the agent's own selection keys, cancels without killing.
+func TestKillConfirmRequiresY(t *testing.T) {
+	inter := collect.Agent{ID: "i1", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "i1", TmuxTarget: "sess:0.0"}
+
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyEsc},
+		{Type: tea.KeyEnter},
+		{Type: tea.KeyRunes, Runes: []rune{'n'}},
+		{Type: tea.KeyRunes, Runes: []rune{'j'}},
+	} {
+		m := Model{snap: projSnap(inter)}
+		m.rebuildRows()
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		next, cmd := next.(Model).Update(key)
+		mm := next.(Model)
+		if mm.confirmingKill {
+			t.Errorf("key %v should clear the confirmation state", key)
+		}
+		if cmd != nil {
+			t.Errorf("key %v must not trigger a kill", key)
+		}
+	}
+
+	m := Model{snap: projSnap(inter)}
+	m.rebuildRows()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if next.(Model).confirmingKill {
+		t.Error("y should clear the confirmation state")
+	}
+	if cmd == nil {
+		t.Error("y should trigger the kill command")
+	}
+}

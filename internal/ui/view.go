@@ -90,6 +90,10 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderFooter() string {
+	if m.confirmingKill {
+		return lipgloss.NewStyle().Foreground(cRed).Bold(true).Render("kill "+m.killName+"?") +
+			styleFaint.Render("  y to confirm · any other key cancels")
+	}
 	if m.composing {
 		return styleTitle.Render("send: ") + m.composeInput + styleFaint.Render("▏  (enter to send · esc to cancel)")
 	}
@@ -104,14 +108,14 @@ func (m Model) renderFooter() string {
 		doneKey = fmt.Sprintf("d +%d done", m.hidden)
 	}
 	keys := []string{
-		"j/k move", "enter attach", "c send", "/ filter", "i note", doneKey, "r refresh", "q/x quit",
+		"j/k move", "enter attach", "c send", "x kill", "/ filter", "i note", doneKey, "r refresh", "q quit",
 	}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
 	switch {
 	case m.notice != "":
 		c := cGreen
-		if strings.HasPrefix(m.notice, "send failed") {
+		if strings.HasPrefix(m.notice, "send failed") || strings.HasPrefix(m.notice, "kill failed") {
 			c = cRed
 		}
 		stamp = lipgloss.NewStyle().Foreground(c).Render(m.notice)

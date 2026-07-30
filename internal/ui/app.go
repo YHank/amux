@@ -58,6 +58,10 @@ type Model struct {
 	composeInput string
 	notice       string // brief, self-clearing status line (e.g. "sent to <pane>")
 
+	confirmingKill bool // "kill <pane>? y to confirm" — any other key cancels
+	killTarget     string
+	killName       string
+
 	width, height int
 	err           error
 	loading       bool
@@ -89,6 +93,12 @@ type sentMsg struct {
 	err    error
 }
 
+// killedMsg reports the outcome of killing a tmux pane.
+type killedMsg struct {
+	name string
+	err  error
+}
+
 func refreshCmd() tea.Msg {
 	snap, err := collect.Collect(time.Now())
 	return snapshotMsg{snap: snap, err: err}
@@ -107,6 +117,16 @@ func sendToPane(target, text string) tea.Cmd {
 			return sentMsg{target: target, err: err}
 		}
 		return sentMsg{target: target}
+	}
+}
+
+// killPane ends a tmux pane outright (its process along with it) — the same
+// effect as mux's own session-delete. Irreversible, so the caller must only
+// invoke this after an explicit confirmation.
+func killPane(target, name string) tea.Cmd {
+	return func() tea.Msg {
+		err := exec.Command("tmux", "kill-pane", "-t", target).Run()
+		return killedMsg{name: name, err: err}
 	}
 }
 
@@ -151,6 +171,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case killedMsg:
+		if msg.err != nil {
+			m.notice = "kill failed: " + msg.err.Error()
+		} else {
+			m.notice = "killed " + msg.name
+		}
+		// No forced refresh here: an immediate refreshCmd would race its own
+		// snapshotMsg handler, which clears m.notice — the killed/failed
+		// notice would flash for under a frame. The regular 2s tick already
+		// picks up the pane's disappearance; that small delay is the same
+		// trade-off sentMsg already makes.
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -158,6 +191,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Kill confirmation: only y/Y confirms; every other key cancels, no
+	// exceptions — a destructive action should never fire on a stray keypress.
+	if m.confirmingKill {
+		target, name := m.killTarget, m.killName
+		m.confirmingKill = false
+		m.killTarget = ""
+		m.killName = ""
+		if s := msg.String(); s == "y" || s == "Y" {
+			return m, killPane(target, name)
+		}
+		return m, nil
+	}
+
 	// Compose entry mode captures most keys as text, same shape as filtering.
 	if m.composing {
 		switch msg.Type {
@@ -220,7 +266,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "q", "x", "ctrl+c":
+	case "q", "ctrl+c":
 		m.quit = true
 		return m, tea.Quit
 	case "j", "down":
@@ -244,6 +290,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
 			m.composing = true
 			m.composeInput = ""
+		}
+	case "x":
+		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
+			m.confirmingKill = true
+			m.killTarget = a.TmuxTarget
+			m.killName = a.Name
 		}
 	case "esc":
 		if m.filter != "" {

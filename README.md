@@ -67,6 +67,9 @@ working right now, what's waiting on you, and what's done — grouped by project
   Enter for you), so you can answer a pending question from the dashboard.
   Interactive only — there's no way to message a headless background job from
   outside `claude agents` itself.
+- **Kill, with confirmation** — press `x` on an interactive agent to end its
+  pane outright (mux-style); only `y` confirms, any other key backs out.
+  Interactive only, for the same reason `c` is.
 - **Active-first** — finished agents are folded away by default (`d` reveals
   them); the count is always shown, never silently dropped.
 - **Your own notes, local to amux** — press `i` to jot a short note on any
@@ -124,11 +127,12 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `g` / `G` | Jump to first / last |
 | `Enter` | Attach to the selected agent's pane (or print resume cmd) |
 | `c` | Compose a message and send it into an interactive agent's pane |
+| `x` | Kill the selected agent's pane (y to confirm) |
 | `/` | Filter by name, project, model, or path |
 | `i` | Add / edit a note on the selected agent |
 | `d` | Show / hide finished agents |
 | `r` | Refresh now |
-| `q` / `x` | Quit |
+| `q` | Quit |
 
 ### tmux status bar
 
