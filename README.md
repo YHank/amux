@@ -61,6 +61,11 @@ working right now, what's waiting on you, and what's done — grouped by project
   guessed from the title.
 - **Live preview** — the detail panel shows the selected agent's real terminal
   output, refreshed every cycle, mux-style — not just a one-line status.
+- **Reply without switching panes** — press `c` on an interactive agent to
+  type a message and send it straight into that pane (types it, then presses
+  Enter for you), so you can answer a pending question from the dashboard.
+  Interactive only — there's no way to message a headless background job from
+  outside `claude agents` itself.
 - **Active-first** — finished agents are folded away by default (`d` reveals
   them); the count is always shown, never silently dropped.
 - **Your own notes, local to amux** — press `i` to jot a short note on any
@@ -117,6 +122,7 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `j` / `k` | Move down / up |
 | `g` / `G` | Jump to first / last |
 | `Enter` | Attach to the selected agent's pane (or print resume cmd) |
+| `c` | Compose a message and send it into an interactive agent's pane |
 | `/` | Filter by name, project, model, or path |
 | `i` | Add / edit a note on the selected agent |
 | `d` | Show / hide finished agents |

@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"os/exec"
 	"strings"
 	"time"
 
@@ -53,6 +54,10 @@ type Model struct {
 	naming     bool // capturing a note for the selected agent
 	noteInput  string
 
+	composing    bool // capturing a message to send into the selected agent's pane
+	composeInput string
+	notice       string // brief, self-clearing status line (e.g. "sent to <pane>")
+
 	width, height int
 	err           error
 	loading       bool
@@ -78,9 +83,31 @@ type snapshotMsg struct {
 	err  error
 }
 
+// sentMsg reports the outcome of injecting a composed message into a pane.
+type sentMsg struct {
+	target string
+	err    error
+}
+
 func refreshCmd() tea.Msg {
 	snap, err := collect.Collect(time.Now())
 	return snapshotMsg{snap: snap, err: err}
+}
+
+// sendToPane types text into a tmux pane as if the user had typed it, then
+// presses Enter — the same two-step tmux send-keys sequence a human would
+// trigger by hand. -l sends the text literally (no key-name interpretation),
+// so no shell is involved and no injection risk exists regardless of content.
+func sendToPane(target, text string) tea.Cmd {
+	return func() tea.Msg {
+		if err := exec.Command("tmux", "send-keys", "-t", target, "-l", text).Run(); err != nil {
+			return sentMsg{target: target, err: err}
+		}
+		if err := exec.Command("tmux", "send-keys", "-t", target, "Enter").Run(); err != nil {
+			return sentMsg{target: target, err: err}
+		}
+		return sentMsg{target: target}
+	}
 }
 
 func tick() tea.Cmd {
@@ -105,6 +132,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case snapshotMsg:
 		m.loading = false
 		m.lastRefresh = time.Now()
+		m.notice = "" // let any prior send/error notice expire on its own
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -115,6 +143,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildRows()
 		return m, nil
 
+	case sentMsg:
+		if msg.err != nil {
+			m.notice = "send failed: " + msg.err.Error()
+		} else {
+			m.notice = "sent to " + msg.target
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -122,6 +158,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Compose entry mode captures most keys as text, same shape as filtering.
+	if m.composing {
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.composing = false
+			text := m.composeInput
+			m.composeInput = ""
+			a := m.selectedAgent()
+			if a == nil || a.TmuxTarget == "" || strings.TrimSpace(text) == "" {
+				return m, nil
+			}
+			return m, sendToPane(a.TmuxTarget, text)
+		case tea.KeyEsc:
+			m.composing = false
+			m.composeInput = ""
+		case tea.KeyBackspace:
+			m.composeInput = dropLastRune(m.composeInput)
+		case tea.KeyRunes, tea.KeySpace:
+			m.composeInput += string(msg.Runes)
+		}
+		return m, nil
+	}
+
 	// Note entry mode captures most keys as text, same shape as filtering.
 	if m.naming {
 		switch msg.Type {
@@ -180,6 +239,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a := m.selectedAgent(); a != nil {
 			m.naming = true
 			m.noteInput = m.notesStore.Get(a.ID)
+		}
+	case "c":
+		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
+			m.composing = true
+			m.composeInput = ""
 		}
 	case "esc":
 		if m.filter != "" {

@@ -3,6 +3,8 @@ package ui
 import (
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/kyhan/amux/internal/collect"
 )
 
@@ -14,11 +16,7 @@ func mkAgent(id string, life collect.Lifecycle) collect.Agent {
 // when an earlier agent finishes and drops out of the default (active) view,
 // instead of silently pointing at whatever now occupies the old row index.
 func TestSelectionAnchorsAcrossRefresh(t *testing.T) {
-	proj := func(agents ...collect.Agent) collect.Snapshot {
-		return collect.Snapshot{Projects: []collect.Project{{Key: "/p", Name: "p", Agents: agents}}}
-	}
-
-	m := Model{snap: proj(
+	m := Model{snap: projSnap(
 		mkAgent("a", collect.LifeWorking),
 		mkAgent("b", collect.LifeWorking),
 		mkAgent("c", collect.LifeWorking),
@@ -30,7 +28,7 @@ func TestSelectionAnchorsAcrossRefresh(t *testing.T) {
 	}
 
 	// "a" finishes and is hidden by default → every row below shifts up.
-	m.snap = proj(
+	m.snap = projSnap(
 		mkAgent("a", collect.LifeDone),
 		mkAgent("b", collect.LifeWorking),
 		mkAgent("c", collect.LifeWorking),
@@ -48,10 +46,7 @@ func TestSelectionAnchorsAcrossRefresh(t *testing.T) {
 // TestSelectionClampsWhenSelectedAgentVanishes verifies a sane fallback when the
 // very agent under the cursor disappears.
 func TestSelectionClampsWhenSelectedAgentVanishes(t *testing.T) {
-	proj := func(agents ...collect.Agent) collect.Snapshot {
-		return collect.Snapshot{Projects: []collect.Project{{Key: "/p", Name: "p", Agents: agents}}}
-	}
-	m := Model{snap: proj(
+	m := Model{snap: projSnap(
 		mkAgent("a", collect.LifeWorking),
 		mkAgent("b", collect.LifeWorking),
 	)}
@@ -59,7 +54,7 @@ func TestSelectionClampsWhenSelectedAgentVanishes(t *testing.T) {
 	m.sel = 1 // "b"
 
 	// "b" finishes and is hidden; only "a" remains visible.
-	m.snap = proj(
+	m.snap = projSnap(
 		mkAgent("a", collect.LifeWorking),
 		mkAgent("b", collect.LifeDone),
 	)
@@ -67,5 +62,99 @@ func TestSelectionClampsWhenSelectedAgentVanishes(t *testing.T) {
 
 	if got := m.selectedAgent(); got == nil || got.ID != "a" {
 		t.Errorf("after selected agent vanished, selected %v, want a (clamped)", got)
+	}
+}
+
+func projSnap(agents ...collect.Agent) collect.Snapshot {
+	return collect.Snapshot{Projects: []collect.Project{{Key: "/p", Name: "p", Agents: agents}}}
+}
+
+// TestComposeOnlyForInteractive verifies `c` is a no-op on a background agent
+// (there's no way to message a headless job from outside `claude agents`) and
+// enters compose mode for an interactive one.
+func TestComposeOnlyForInteractive(t *testing.T) {
+	bg := collect.Agent{ID: "b1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/p", Name: "b1"}
+	m := Model{snap: projSnap(bg)}
+	m.rebuildRows()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if next.(Model).composing {
+		t.Error("c should not enter compose mode for a background agent")
+	}
+
+	inter := collect.Agent{ID: "i1", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "i1", TmuxTarget: "sess:0.0"}
+	m = Model{snap: projSnap(inter)}
+	m.rebuildRows()
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if !next.(Model).composing {
+		t.Fatal("c should enter compose mode for an interactive agent")
+	}
+}
+
+// TestComposeEnterSendsAndExits verifies typed text accumulates and Enter both
+// exits compose mode and returns a non-nil send command.
+func TestComposeEnterSendsAndExits(t *testing.T) {
+	inter := collect.Agent{ID: "i1", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "i1", TmuxTarget: "sess:0.0"}
+	m := Model{snap: projSnap(inter)}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	mm := next.(Model)
+
+	next, _ = mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
+	mm = next.(Model)
+	if mm.composeInput != "hi" {
+		t.Fatalf("composeInput = %q, want %q", mm.composeInput, "hi")
+	}
+
+	next, cmd := mm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mm = next.(Model)
+	if mm.composing {
+		t.Error("enter should exit compose mode")
+	}
+	if mm.composeInput != "" {
+		t.Error("enter should clear the compose buffer")
+	}
+	if cmd == nil {
+		t.Error("expected a non-nil send command")
+	}
+}
+
+// TestComposeEscCancelsWithoutSending verifies Esc discards the draft and
+// never returns a send command.
+func TestComposeEscCancelsWithoutSending(t *testing.T) {
+	inter := collect.Agent{ID: "i1", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "i1", TmuxTarget: "sess:0.0"}
+	m := Model{snap: projSnap(inter)}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("nope")})
+	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mm := next.(Model)
+	if mm.composing || mm.composeInput != "" {
+		t.Errorf("esc should clear compose state, got composing=%v input=%q", mm.composing, mm.composeInput)
+	}
+	if cmd != nil {
+		t.Error("esc should never return a send command")
+	}
+}
+
+// TestComposeEnterWithEmptyTextDoesNotSend verifies pressing enter on a blank
+// draft exits compose mode without triggering a send.
+func TestComposeEnterWithEmptyTextDoesNotSend(t *testing.T) {
+	inter := collect.Agent{ID: "i1", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "i1", TmuxTarget: "sess:0.0"}
+	m := Model{snap: projSnap(inter)}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("enter with an empty draft should not send")
+	}
+	if next.(Model).composing {
+		t.Error("enter should still exit compose mode with an empty draft")
 	}
 }

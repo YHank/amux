@@ -90,6 +90,9 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderFooter() string {
+	if m.composing {
+		return styleTitle.Render("send: ") + m.composeInput + styleFaint.Render("▏  (enter to send · esc to cancel)")
+	}
 	if m.naming {
 		return styleTitle.Render("note: ") + m.noteInput + styleFaint.Render("▏  (enter to save · esc to cancel)")
 	}
@@ -101,11 +104,18 @@ func (m Model) renderFooter() string {
 		doneKey = fmt.Sprintf("d +%d done", m.hidden)
 	}
 	keys := []string{
-		"j/k move", "enter attach", "/ filter", "i note", doneKey, "r refresh", "q/x quit",
+		"j/k move", "enter attach", "c send", "/ filter", "i note", doneKey, "r refresh", "q/x quit",
 	}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
-	if !m.lastRefresh.IsZero() {
+	switch {
+	case m.notice != "":
+		c := cGreen
+		if strings.HasPrefix(m.notice, "send failed") {
+			c = cRed
+		}
+		stamp = lipgloss.NewStyle().Foreground(c).Render(m.notice)
+	case !m.lastRefresh.IsZero():
 		stamp = styleFaint.Render("updated " + m.lastRefresh.Format("15:04:05"))
 	}
 	gap := m.width - lipgloss.Width(help) - lipgloss.Width(stamp)
