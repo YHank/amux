@@ -199,6 +199,61 @@ func TestStripANSI(t *testing.T) {
 	}
 }
 
+func TestContentShowsSpinner(t *testing.T) {
+	// Real omp fixtures, captured live mid-task.
+	working1 := []string{
+		" Todos", "  Review · 0/2", "",
+		" ⠸ Running Go test suite ⟨esc⟩", "",
+	}
+	if !contentShowsSpinner(working1) {
+		t.Error("expected omp's in-body spinner line to be detected")
+	}
+	working2 := []string{
+		"╰──────────────╯", "",
+		" ⠦ Creating Claude config guide ⟨esc⟩", "",
+	}
+	if !contentShowsSpinner(working2) {
+		t.Error("expected second omp spinner fixture to be detected")
+	}
+
+	// Real omp idle fixture: static "π: <task>" title context, no spinner
+	// anywhere in the body — verified against the same tool's idle output.
+	idle := []string{
+		"", "Recent sessions", "No recent sessions", "",
+		"╭──     GPT-5.6-Terra++ · low   ─────────────────────────────╮",
+	}
+	if contentShowsSpinner(idle) {
+		t.Error("idle omp content must not be detected as working")
+	}
+
+	// Scrollback guard: a spinner line buried above the scan window must not
+	// match, same reasoning as the choice-prompt scrollback fix.
+	buried := append([]string{"⠸ old, scrolled-off spinner from a past task"},
+		make([]string, 15)...)
+	buried = append(buried, "ordinary idle line")
+	for i := range buried {
+		if buried[i] == "" {
+			buried[i] = "filler"
+		}
+	}
+	if contentShowsSpinner(buried) {
+		t.Error("a spinner line outside the trailing scan window must not match")
+	}
+}
+
+func TestIsSpinnerGlyph(t *testing.T) {
+	for _, r := range []rune{'⠂', '⠐', '⠸', '⠦'} {
+		if !isSpinnerGlyph(r) {
+			t.Errorf("%q (U+%04X) should be a spinner glyph", r, r)
+		}
+	}
+	for _, r := range []rune{'a', '가', '✻', '✽', 'π', ' '} {
+		if isSpinnerGlyph(r) {
+			t.Errorf("%q (U+%04X) should not be a spinner glyph", r, r)
+		}
+	}
+}
+
 func TestJobName(t *testing.T) {
 	if got := jobName(jobState{Name: "my-feature\t205"}, "abc"); got != "my-feature" {
 		t.Errorf("explicit name: got %q", got)

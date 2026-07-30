@@ -79,6 +79,9 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 		tool := detectTool(ap)
 		preview := capturePane(pn.target, previewLines)
 		life := interactiveLife(pn.title)
+		if life == LifeIdle && contentShowsSpinner(preview) {
+			life = LifeWorking
+		}
 		needsInput := looksLikeChoicePrompt(preview)
 		if needsInput {
 			life = LifeInput
@@ -174,24 +177,64 @@ func looksLikeChoicePrompt(lines []string) bool {
 // interactiveLife distinguishes an AI-tool pane that is actively generating
 // from one that's alive but idle (waiting on the user).
 //
-// Claude Code and Oh My Pi both write an animated spinner glyph as the first
-// character of the tmux pane title while actively working (e.g. "⠂ my task"),
-// and drop it once they're idle/waiting for input (e.g. "claude agents",
-// "π: my task"). The glyph is a Braille Pattern character (U+2800–U+28FF), a
-// block used exclusively for spinner animations, not real text — verified
-// live by capturing this exact pane's title mid-generation vs. an idle
-// sibling pane. Absent that signal (no title, or a tool that doesn't set one),
-// we can't confirm active generation, so default to idle rather than assuming.
+// isSpinnerGlyph reports whether r is one of the Braille Pattern characters
+// (U+2800–U+28FF), a block Claude Code and Oh My Pi use exclusively for
+// animated spinners, never for real text — verified live in both this pane
+// title (Claude Code) and pane body content (Oh My Pi).
+func isSpinnerGlyph(r rune) bool {
+	return r >= 0x2800 && r <= 0x28FF
+}
+
+// interactiveLife distinguishes an AI-tool pane that is actively generating
+// from one that's alive but idle (waiting on the user), using the tmux pane
+// title alone.
+//
+// Claude Code writes a spinner glyph as the first character of the pane
+// title while working (e.g. "⠂ my task") and drops it when idle ("claude
+// agents"). Oh My Pi does NOT: its title is a static "π: <task>" whether
+// working or idle — verified live by capturing the same omp pane both mid-task
+// and at rest, both showing the identical title shape. So this alone
+// correctly detects Claude Code but always reads Idle for omp; omp's own
+// signal is checked separately, in its pane content (see contentShowsSpinner).
 func interactiveLife(title string) Lifecycle {
 	t := strings.TrimSpace(title)
 	if t == "" {
 		return LifeIdle
 	}
-	r := []rune(t)[0]
-	if r >= 0x2800 && r <= 0x28FF {
+	if isSpinnerGlyph([]rune(t)[0]) {
 		return LifeWorking
 	}
 	return LifeIdle
+}
+
+// contentSpinnerScanLines bounds how many trailing content lines are checked
+// for an in-body spinner, for the same reason choicePromptScanLines is
+// bounded: a genuine live spinner is always near the current bottom of
+// screen, not buried in scrollback.
+const contentSpinnerScanLines = 10
+
+// contentShowsSpinner reports whether any of the trailing lines starts with a
+// spinner glyph once ANSI codes are stripped. Oh My Pi renders its working
+// indicator as an ordinary line in the pane body — e.g.
+// "⠦ Creating Claude config guide ⟨esc⟩" — never in the tmux title, so title
+// alone (interactiveLife) leaves every omp pane looking idle regardless of
+// whether it's actually working. Verified live against two real omp panes
+// caught mid-task.
+func contentShowsSpinner(lines []string) bool {
+	tail := lines
+	if len(tail) > contentSpinnerScanLines {
+		tail = tail[len(tail)-contentSpinnerScanLines:]
+	}
+	for _, l := range tail {
+		plain := strings.TrimSpace(stripANSI(l))
+		if plain == "" {
+			continue
+		}
+		if isSpinnerGlyph([]rune(plain)[0]) {
+			return true
+		}
+	}
+	return false
 }
 
 // titleOrCmd prefers a meaningful pane title; otherwise falls back to the argv.
