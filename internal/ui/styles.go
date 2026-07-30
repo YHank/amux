@@ -17,6 +17,7 @@ var (
 	cFaint  = lipgloss.Color("240")
 	cText   = lipgloss.Color("252")
 	cAccent = lipgloss.Color("170") // headers / selection
+	cNote   = lipgloss.Color("80")  // user-authored notes
 )
 
 var (
@@ -28,6 +29,7 @@ var (
 	styleFaint     = lipgloss.NewStyle().Foreground(cFaint)
 	styleMeta      = lipgloss.NewStyle().Foreground(cBlue)
 	styleDetailKey = lipgloss.NewStyle().Foreground(cFaint)
+	styleNote      = lipgloss.NewStyle().Italic(true).Foreground(cNote)
 
 	styleDivider = lipgloss.NewStyle().Foreground(cFaint)
 	stylePanel   = lipgloss.NewStyle().Foreground(cText)

@@ -90,6 +90,9 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderFooter() string {
+	if m.naming {
+		return styleTitle.Render("note: ") + m.noteInput + styleFaint.Render("▏  (enter to save · esc to cancel)")
+	}
 	if m.filtering {
 		return styleTitle.Render("/") + m.filter + styleFaint.Render("▏  (enter to apply · esc to clear)")
 	}
@@ -98,7 +101,7 @@ func (m Model) renderFooter() string {
 		doneKey = fmt.Sprintf("d +%d done", m.hidden)
 	}
 	keys := []string{
-		"j/k move", "enter attach", "/ filter", doneKey, "r refresh", "q/x quit",
+		"j/k move", "enter attach", "/ filter", "i note", doneKey, "r refresh", "q/x quit",
 	}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
@@ -190,6 +193,9 @@ func (m Model) renderAgentRow(a *collect.Agent, w int, selected bool, now time.T
 	}
 
 	left := fmt.Sprintf("%s%s %s %s", cursor, glyph, kind, nameStyle.Render(name))
+	if note := m.notesStore.Get(a.ID); note != "" {
+		left += "  " + styleNote.Render("» "+note)
+	}
 	metaR := styleFaint.Render(meta)
 
 	gap := w - lipgloss.Width(left) - lipgloss.Width(metaR)
@@ -232,7 +238,11 @@ func (m Model) renderDetail(w, h int) string {
 
 	head := lipgloss.NewStyle().Foreground(lifeColor(a.Life)).Bold(true).
 		Render(lifeGlyph(a.Life) + " " + lifeLabel(a.Life))
-	b.WriteString(head + "  " + styleTitle.Render(a.Name) + "\n\n")
+	b.WriteString(head + "  " + styleTitle.Render(a.Name) + "\n")
+	if note := m.notesStore.Get(a.ID); note != "" {
+		b.WriteString(styleNote.Render("» "+wrap(note, w)) + "\n")
+	}
+	b.WriteString("\n")
 
 	kv := func(k, v string) {
 		if strings.TrimSpace(v) == "" {
@@ -263,6 +273,22 @@ func (m Model) renderDetail(w, h int) string {
 		kv("updated", humanDuration(a.Age(now))+" ago")
 	}
 
+	if a.Kind == collect.KindInteractive {
+		if a.NeedsInput {
+			b.WriteString("\n" + lipgloss.NewStyle().Foreground(cYellow).Bold(true).
+				Render("◆ waiting on your input") + "\n")
+		}
+		if len(a.Preview) > 0 {
+			b.WriteString("\n" + styleDetailKey.Render("preview") + "\n")
+			used := strings.Count(b.String(), "\n") + 1
+			b.WriteString(renderPreview(a.Preview, w, h-used))
+		} else if a.Detail != "" {
+			b.WriteString("\n" + styleDetailKey.Render("status") + "\n")
+			b.WriteString(wrap(a.Detail, w) + "\n")
+		}
+		return b.String()
+	}
+
 	if a.NeedsInput && a.Suggested != "" {
 		b.WriteString("\n" + lipgloss.NewStyle().Foreground(cYellow).Bold(true).Render("↩ suggested reply") + "\n")
 		b.WriteString(wrap(a.Suggested, w) + "\n")
@@ -278,4 +304,22 @@ func (m Model) renderDetail(w, h int) string {
 	}
 
 	return b.String()
+}
+
+// renderPreview renders the tail of a pane's captured content that fits in
+// maxLines, each line truncated to w columns — a live, mux-style window into
+// what the agent is actually doing right now.
+func renderPreview(lines []string, w, maxLines int) string {
+	if maxLines < 3 {
+		maxLines = 3
+	}
+	tail := lines
+	if len(tail) > maxLines {
+		tail = tail[len(tail)-maxLines:]
+	}
+	out := make([]string, len(tail))
+	for i, l := range tail {
+		out[i] = styleFaint.Render(truncateWidth(l, w))
+	}
+	return strings.Join(out, "\n")
 }

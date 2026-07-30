@@ -16,7 +16,7 @@ func TestDetectTool(t *testing.T) {
 		{"plain zsh", proc{comm: "zsh", args: "zsh"}, ""},
 		{"codex via argv0 basename", proc{comm: "node", args: "node /usr/local/bin/codex --foo"}, "codex"},
 		{"absolute claude path", proc{comm: "claude", args: "/Users/x/.local/bin/claude"}, "claude"},
-		{"omp via bun wrapper", proc{comm: "bun", args: "bun /Users/ky-han/.bun/bin/omp"}, "omp"},
+		{"omp via bun wrapper", proc{comm: "bun", args: "bun /Users/x/.bun/bin/omp"}, "omp"},
 		{"unrelated node", proc{comm: "node", args: "node server.js"}, ""},
 	}
 	for _, c := range cases {
@@ -98,6 +98,54 @@ func TestInteractiveLife(t *testing.T) {
 		if got := interactiveLife(c.title); got != c.want {
 			t.Errorf("interactiveLife(%q) = %q, want %q", c.title, got, c.want)
 		}
+	}
+}
+
+func TestLooksLikeChoicePrompt(t *testing.T) {
+	// Verified live: this is the real footer Claude Code renders while a
+	// question/AskUserQuestion-style choice is pending.
+	pending := []string{
+		"────────────────────────────────────────",
+		" ☐ Choice",
+		"",
+		"Pick A or B?",
+		"",
+		"❯ 1. A",
+		"     Option A",
+		"  2. B",
+		"     Option B",
+		"────────────────────────────────────────",
+		"Enter to select · ↑/↓ to navigate · Esc to cancel",
+	}
+	if !looksLikeChoicePrompt(pending) {
+		t.Error("expected pending choice prompt to be detected")
+	}
+
+	// The bare "❯ " cursor glyph alone appears in ordinary idle/typing
+	// screens too — must not trigger a false positive on its own.
+	idleTyping := []string{
+		"──────────────────────────────",
+		"❯ describe a task for a new session",
+		"──────────────────────────────",
+		"  enter to open · space to reply · ctrl+x to delete · ? for shortcuts",
+	}
+	if looksLikeChoicePrompt(idleTyping) {
+		t.Error("idle typing prompt (bare ❯, no choice footer) must not match")
+	}
+
+	working := []string{
+		"❯ do the thing",
+		"",
+		"⏺ Running 1 shell command…",
+		"",
+		"✽ Pouncing… (4s · ↓ 75 tokens · thought for 2s)",
+	}
+	if looksLikeChoicePrompt(working) {
+		t.Error("actively-working screen must not match")
+	}
+
+	if looksLikeChoicePrompt(nil) {
+		t.Error("nil lines must not match")
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/kyhan/amux/internal/collect"
+	"github.com/kyhan/amux/internal/notes"
 )
 
 // refreshEvery is how often the dashboard re-scans the environment.
@@ -48,6 +49,10 @@ type Model struct {
 	showDone  bool // reveal finished (done/stopped/error) agents
 	hidden    int  // count of finished agents hidden by the current view
 
+	notesStore *notes.Store
+	naming     bool // capturing a note for the selected agent
+	noteInput  string
+
 	width, height int
 	err           error
 	loading       bool
@@ -59,7 +64,7 @@ type Model struct {
 
 // New builds an initial model.
 func New() Model {
-	return Model{loading: true}
+	return Model{loading: true, notesStore: notes.Load()}
 }
 
 // Chosen returns the action selected before quitting, if any.
@@ -106,6 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.snap = msg.snap
+		m.pruneNotes()
 		m.rebuildRows()
 		return m, nil
 
@@ -116,6 +122,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Note entry mode captures most keys as text, same shape as filtering.
+	if m.naming {
+		switch msg.Type {
+		case tea.KeyEnter:
+			if a := m.selectedAgent(); a != nil {
+				m.notesStore.Set(a.ID, strings.TrimSpace(m.noteInput))
+			}
+			m.naming = false
+		case tea.KeyEsc:
+			m.naming = false
+			m.noteInput = ""
+		case tea.KeyBackspace:
+			m.noteInput = dropLastRune(m.noteInput)
+		case tea.KeyRunes, tea.KeySpace:
+			m.noteInput += string(msg.Runes)
+		}
+		return m, nil
+	}
+
 	// Filter entry mode captures most keys as text.
 	if m.filtering {
 		switch msg.Type {
@@ -126,10 +151,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter = ""
 			m.rebuildRows()
 		case tea.KeyBackspace:
-			if m.filter != "" {
-				m.filter = m.filter[:len(m.filter)-1]
-				m.rebuildRows()
-			}
+			m.filter = dropLastRune(m.filter)
+			m.rebuildRows()
 		case tea.KeyRunes, tea.KeySpace:
 			m.filter += string(msg.Runes)
 			m.rebuildRows()
@@ -153,6 +176,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		m.filtering = true
+	case "i":
+		if a := m.selectedAgent(); a != nil {
+			m.naming = true
+			m.noteInput = m.notesStore.Get(a.ID)
+		}
 	case "esc":
 		if m.filter != "" {
 			m.filter = ""
@@ -171,6 +199,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// pruneNotes drops any stored note whose agent isn't in the current snapshot
+// (unfiltered — filtering never removes an agent from m.snap, only from the
+// displayed rows), so notes.json doesn't accumulate labels for finished runs.
+func (m *Model) pruneNotes() {
+	live := make(map[string]bool, len(m.snap.Agents))
+	for _, a := range m.snap.Agents {
+		live[a.ID] = true
+	}
+	m.notesStore.Prune(live)
 }
 
 func (m *Model) moveSel(d int) {

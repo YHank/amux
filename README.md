@@ -55,10 +55,19 @@ working right now, what's waiting on you, and what's done — grouped by project
   "live" or not: amux reads the spinner glyph Claude Code/Oh My Pi write into
   the pane title while actively generating, so you can tell a busy agent from
   one that's alive but sitting at a prompt waiting for you.
+- **Knows when an agent is waiting on *you*** — a distinct `◆ input` state for
+  an agent that has asked a question (e.g. Claude Code's AskUserQuestion) and
+  is blocked on your choice, detected from the pane's actual content, not
+  guessed from the title.
+- **Live preview** — the detail panel shows the selected agent's real terminal
+  output, refreshed every cycle, mux-style — not just a one-line status.
 - **Active-first** — finished agents are folded away by default (`d` reveals
   them); the count is always shown, never silently dropped.
-- **Live detail** — model, tokens, CPU, age, status line, and the original task
-  for the selected agent.
+- **Your own notes, local to amux** — press `i` to jot a short note on any
+  agent (why it's running, what you're waiting on); saved to disk, shown in
+  the list and detail panel, never written back to tmux/Claude/omp.
+- **Live detail** — model, tokens, CPU, age, and the original task for the
+  selected agent.
 - **Attach in a keystroke** — `Enter` switches to an interactive agent's pane;
   for a background agent it prints the `claude --resume` command.
 - **Statusbar widget** — `amux status` prints a compact `▶2 ◆1` summary.
@@ -109,6 +118,7 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `g` / `G` | Jump to first / last |
 | `Enter` | Attach to the selected agent's pane (or print resume cmd) |
 | `/` | Filter by name, project, model, or path |
+| `i` | Add / edit a note on the selected agent |
 | `d` | Show / hide finished agents |
 | `r` | Refresh now |
 | `q` / `x` | Quit |
@@ -121,16 +131,26 @@ set -g status-right '#(amux status)'
 
 ## How it works
 
-Each 2-second refresh does exactly one `ps`, one `tmux list-panes`, and a
-handful of bounded directory scans/globs — no background daemon of its own, no
-polling per pane. Interactive agents are found by walking each pane's process
-tree for an AI-tool foreground process. Background agents are read straight
-from each source's own on-disk state:
+Each 2-second refresh does exactly one `ps`, one `tmux list-panes`, one
+`tmux capture-pane` per detected AI-tool pane, and a handful of bounded
+directory scans/globs — no background daemon of its own. Interactive agents
+are found by walking each pane's process tree for an AI-tool foreground
+process; the captured pane content doubles as the live preview and as the
+signal for the `◆ input` state (matched against Claude Code's own
+AskUserQuestion-style choice-prompt footer — verified against a real pending
+prompt, not guessed, though other tools' or dialogs' wording may not be
+caught). Background agents are read straight from each source's own on-disk
+state:
 
 - Claude Code: `~/.claude/jobs/*/state.json`; liveness from the daemon's
   `/tmp/cc-daemon-*/*/rv/<id>.sock` rendezvous socket.
 - Oh My Pi: `~/.omp/run/daemons/*/daemons/*/meta.json`; liveness from the
   owning client's pid in the sibling `clients/*.json` registry.
+
+Notes you add with `i` live in their own file (`$XDG_CONFIG_HOME/amux/notes.json`,
+or the platform equivalent via `os.UserConfigDir()`), keyed by agent ID and
+pruned automatically once that agent's run ends — amux never touches any other
+tool's files.
 
 ## Requirements
 

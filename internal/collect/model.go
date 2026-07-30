@@ -69,16 +69,21 @@ type Agent struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
-	// Interactive-only fields.
-	TmuxTarget string  // "session:win.pane" — attach target
-	Session    string  // tmux session name
-	PID        int     // foreground agent pid
-	CPU        float64 // %CPU of the agent process subtree
+	// agent has asked a question and is waiting on the user to pick an
+	// option — set from job state.json (background) or a live scan of the
+	// pane's own content for the choice-prompt UI (interactive).
+	NeedsInput bool
 
-	// Background-only extras.
-	NeedsInput bool   // a reply is expected
-	Suggested  string // suggested reply, if any
-	Short      string // daemonShort id (for `claude` resume hints)
+	// Interactive-only fields.
+	TmuxTarget string   // "session:win.pane" — attach target
+	Session    string   // tmux session name
+	PID        int      // foreground agent pid
+	CPU        float64  // %CPU of the agent process subtree
+	Preview    []string // last few lines of the pane's actual terminal output
+
+	// Background-only extras (Claude Code jobs).
+	Suggested string // suggested reply, if any
+	Short     string // daemonShort id (for `claude` resume hints)
 }
 
 // Age returns how long ago the agent last changed state.

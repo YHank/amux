@@ -25,6 +25,17 @@ func wrap(s string, w int) string {
 	return wordwrap.String(s, w)
 }
 
+// dropLastRune removes the last rune of s. Byte-slicing here would corrupt
+// multi-byte input (Korean, emoji, ...) on backspace — text entry fields in
+// this app are expected to hold non-ASCII, e.g. Korean task notes.
+func dropLastRune(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return s
+	}
+	return string(r[:len(r)-1])
+}
+
 // clip limits a string to n runes without styling concerns (used on raw text).
 func clip(s string, n int) string {
 	r := []rune(s)

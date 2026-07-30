@@ -57,6 +57,11 @@ func listPanes() ([]pane, error) {
 	return panes, nil
 }
 
+// previewLines is how many trailing lines of a pane's real content amux reads
+// per refresh — enough to reliably contain a choice-prompt block and to fill
+// the detail panel, cheap enough to fetch every cycle for a handful of panes.
+const previewLines = 40
+
 // interactiveAgents scans every pane for a foreground AI process and builds an
 // Agent for each match.
 func interactiveAgents(procs *procTable) ([]Agent, error) {
@@ -71,12 +76,18 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 			continue
 		}
 		tool := detectTool(ap)
+		preview := capturePane(pn.target, previewLines)
+		life := interactiveLife(pn.title)
+		needsInput := looksLikeChoicePrompt(preview)
+		if needsInput {
+			life = LifeInput
+		}
 		agents = append(agents, Agent{
 			ID:         pn.paneID,
 			Kind:       KindInteractive,
 			Tool:       tool,
 			Name:       pn.target,
-			Life:       interactiveLife(pn.title),
+			Life:       life,
 			State:      "live",
 			Detail:     titleOrCmd(pn.title, ap),
 			CWD:        pn.path,
@@ -85,9 +96,52 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 			Session:    pn.session,
 			PID:        ap.pid,
 			CPU:        procs.subtreeCPU(ap.pid),
+			Preview:    preview,
+			NeedsInput: needsInput,
 		})
 	}
 	return agents, nil
+}
+
+// capturePane returns the last n lines of a pane's actual terminal content,
+// right-trimmed. Best-effort: a capture failure (pane closed mid-scan, etc.)
+// yields nil rather than an error, since a missing preview shouldn't drop the
+// whole agent from the snapshot.
+func capturePane(target string, n int) []string {
+	out, err := exec.Command("tmux", "capture-pane", "-p", "-t", target, "-S", "-"+strconv.Itoa(n)).Output()
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " \t")
+	}
+	return lines
+}
+
+// looksLikeChoicePrompt reports whether the captured pane content shows the
+// agent mid-question, blocked on the user picking one of several options —
+// e.g. Claude Code's AskUserQuestion UI:
+//
+//	 ☐ Choice
+//	Pick A or B?
+//	❯ 1. A
+//	  2. B
+//	Enter to select · ↑/↓ to navigate · Esc to cancel
+//
+// The footer line is the signal: verified live against a real pending
+// question (captured mid-prompt) and against ordinary idle/typing screens
+// (which use the same "❯ " cursor glyph but never this footer), so matching
+// on it avoids false positives from "❯ " alone. This is intentionally
+// conservative — dialects of this UI or other tools' own approval prompts that
+// phrase their footer differently won't be caught.
+func looksLikeChoicePrompt(lines []string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, "Enter to select") && strings.Contains(l, "navigate") {
+			return true
+		}
+	}
+	return false
 }
 
 // interactiveLife distinguishes an AI-tool pane that is actively generating
