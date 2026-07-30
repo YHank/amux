@@ -59,8 +59,9 @@ working right now, what's waiting on you, and what's done — grouped by project
   an agent that has asked a question (e.g. Claude Code's AskUserQuestion) and
   is blocked on your choice, detected from the pane's actual content, not
   guessed from the title.
-- **Live preview** — the detail panel shows the selected agent's real terminal
-  output, refreshed every cycle, mux-style — not just a one-line status.
+- **Live preview, in color** — the detail panel shows the selected agent's
+  real terminal output with its own colors intact, refreshed every cycle,
+  mux-style — not just a flat one-line status.
 - **Reply without switching panes** — press `c` on an interactive agent to
   type a message and send it straight into that pane (types it, then presses
   Enter for you), so you can answer a pending question from the dashboard.

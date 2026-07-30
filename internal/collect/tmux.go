@@ -2,6 +2,7 @@ package collect
 
 import (
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -104,11 +105,13 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 }
 
 // capturePane returns the last n lines of a pane's actual terminal content,
-// right-trimmed. Best-effort: a capture failure (pane closed mid-scan, etc.)
-// yields nil rather than an error, since a missing preview shouldn't drop the
-// whole agent from the snapshot.
+// right-trimmed, with the pane's own ANSI color/style codes preserved (-e) so
+// the live preview shows real colors instead of flat text. Best-effort: a
+// capture failure (pane closed mid-scan, etc.) yields nil rather than an
+// error, since a missing preview shouldn't drop the whole agent from the
+// snapshot.
 func capturePane(target string, n int) []string {
-	out, err := exec.Command("tmux", "capture-pane", "-p", "-t", target, "-S", "-"+strconv.Itoa(n)).Output()
+	out, err := exec.Command("tmux", "capture-pane", "-p", "-e", "-t", target, "-S", "-"+strconv.Itoa(n)).Output()
 	if err != nil {
 		return nil
 	}
@@ -117,6 +120,16 @@ func capturePane(target string, n int) []string {
 		lines[i] = strings.TrimRight(l, " \t")
 	}
 	return lines
+}
+
+var ansiCSI = regexp.MustCompile("\x1b\\[[0-9;]*[a-zA-Z]")
+
+// stripANSI removes terminal SGR/CSI escape sequences. Text-based detection
+// (looksLikeChoicePrompt) runs on stripped lines so embedded color codes from
+// capturePane's -e output can never split or hide the marker text it matches
+// against.
+func stripANSI(s string) string {
+	return ansiCSI.ReplaceAllString(s, "")
 }
 
 // choicePromptScanLines bounds how many trailing lines are checked for the
@@ -150,7 +163,8 @@ func looksLikeChoicePrompt(lines []string) bool {
 		tail = tail[len(tail)-choicePromptScanLines:]
 	}
 	for _, l := range tail {
-		if strings.Contains(l, "Enter to select") && strings.Contains(l, "navigate") {
+		plain := stripANSI(l)
+		if strings.Contains(plain, "Enter to select") && strings.Contains(plain, "navigate") {
 			return true
 		}
 	}

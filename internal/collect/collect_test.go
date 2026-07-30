@@ -174,6 +174,31 @@ func TestLooksLikeChoicePromptIgnoresScrollbackMentions(t *testing.T) {
 	}
 }
 
+func TestLooksLikeChoicePromptStripsANSI(t *testing.T) {
+	// capturePane now captures with -e (color codes preserved for the live
+	// preview); detection must still match a footer wrapped in real SGR codes.
+	colored := []string{
+		"\x1b[38;5;214m ☐ Choice\x1b[0m",
+		"Pick A or B?",
+		"\x1b[1m❯ 1. A\x1b[0m",
+		"  2. B",
+		"\x1b[38;5;240mEnter to select · ↑/↓ to navigate · Esc to cancel\x1b[0m",
+	}
+	if !looksLikeChoicePrompt(colored) {
+		t.Error("choice prompt wrapped in ANSI color codes should still be detected")
+	}
+}
+
+func TestStripANSI(t *testing.T) {
+	in := "\x1b[38;5;214mhello\x1b[0m world\x1b[1m!\x1b[0m"
+	if got := stripANSI(in); got != "hello world!" {
+		t.Errorf("stripANSI(%q) = %q, want %q", in, got, "hello world!")
+	}
+	if got := stripANSI("plain text"); got != "plain text" {
+		t.Errorf("stripANSI on plain text should be a no-op, got %q", got)
+	}
+}
+
 func TestJobName(t *testing.T) {
 	if got := jobName(jobState{Name: "my-feature\t205"}, "abc"); got != "my-feature" {
 		t.Errorf("explicit name: got %q", got)

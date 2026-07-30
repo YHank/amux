@@ -28,7 +28,7 @@ func (m Model) View() string {
 		bodyH = 3
 	}
 
-	listW := m.width * 55 / 100
+	listW := m.width * 40 / 100
 	if listW < 28 {
 		listW = 28
 	}
@@ -316,9 +316,15 @@ func (m Model) renderDetail(w, h int) string {
 	return b.String()
 }
 
+// ansiReset closes out any color/style left open by a captured line, so a
+// pane's own ANSI codes can never bleed into the rest of amux's UI below it.
+const ansiReset = "\x1b[0m"
+
 // renderPreview renders the tail of a pane's captured content that fits in
 // maxLines, each line truncated to w columns — a live, mux-style window into
-// what the agent is actually doing right now.
+// what the agent is actually doing right now. Lines carry the pane's own
+// ANSI color codes (from capturePane's -e capture) rendered as-is, not
+// flattened to a single dim color, so the preview looks like the real thing.
 func renderPreview(lines []string, w, maxLines int) string {
 	if maxLines < 3 {
 		maxLines = 3
@@ -329,7 +335,7 @@ func renderPreview(lines []string, w, maxLines int) string {
 	}
 	out := make([]string, len(tail))
 	for i, l := range tail {
-		out[i] = styleFaint.Render(truncateWidth(l, w))
+		out[i] = truncateWidth(l, w) + ansiReset
 	}
 	return strings.Join(out, "\n")
 }
