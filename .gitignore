@@ -5,6 +5,7 @@
 
 # OMC / Claude Code operational state
 .omc/
+.claude/
 
 # OS
 .DS_Store

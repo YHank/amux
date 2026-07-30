@@ -58,6 +58,14 @@ working right now, what's waiting on you, and what's done — grouped by project
 - **Statusbar widget** — `amux status` prints a compact `▶2 ◆1` summary.
 - **Popup mode** — summon amux as a floating overlay over any session.
 
+## Scope
+
+amux tracks **AI agents** — `claude` (interactive and background) plus
+`codex`/`aider`/`gemini` when they run in a pane. Ordinary shells, editors, and
+prompt sessions (e.g. `oh-my-posh` panes) are intentionally **not** listed:
+they are environment, not agents. Background-agent detail (model, tokens, task)
+is Claude-specific today.
+
 ## Install
 
 > **Note:** the Go module path (`github.com/kyhan/amux`) is a placeholder. Point

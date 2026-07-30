@@ -23,7 +23,6 @@ var (
 	styleTitle     = lipgloss.NewStyle().Bold(true).Foreground(cAccent)
 	styleHelp      = lipgloss.NewStyle().Foreground(cFaint)
 	styleProj      = lipgloss.NewStyle().Bold(true).Foreground(cText)
-	styleProjPath  = lipgloss.NewStyle().Foreground(cFaint)
 	styleSel       = lipgloss.NewStyle().Bold(true).Foreground(cAccent)
 	styleMuted     = lipgloss.NewStyle().Foreground(cGray)
 	styleFaint     = lipgloss.NewStyle().Foreground(cFaint)

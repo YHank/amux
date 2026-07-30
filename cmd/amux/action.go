@@ -27,6 +27,13 @@ func attachTmux(a *ui.Action) error {
 	if a.TmuxTarget == "" {
 		return fmt.Errorf("no tmux target")
 	}
+	// From a popup, switch-client with no -c would target the popup's own
+	// ephemeral client (destroyed on close), not the client that opened it.
+	// amux popup captures the invoking client into AMUX_CLIENT so the switch
+	// lands on the real outer client.
+	if c := os.Getenv("AMUX_CLIENT"); c != "" {
+		return runInherit("tmux", "switch-client", "-c", c, "-t", a.TmuxTarget)
+	}
 	if os.Getenv("TMUX") != "" {
 		return runInherit("tmux", "switch-client", "-t", a.TmuxTarget)
 	}

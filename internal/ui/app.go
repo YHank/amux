@@ -204,6 +204,15 @@ func actionFor(a *collect.Agent) *Action {
 // rebuildRows flattens the snapshot into display rows, honoring the filter, and
 // clamps the selection.
 func (m *Model) rebuildRows() {
+	// Remember which agent is selected so the cursor stays on it across a
+	// refresh — otherwise an agent finishing (and vanishing) or a new one
+	// appearing would shift every row and silently move the selection to a
+	// different agent, exactly when the user is watching a transition.
+	prevID := ""
+	if a := m.selectedAgent(); a != nil {
+		prevID = a.ID
+	}
+
 	m.rows = m.rows[:0]
 	m.selRows = m.selRows[:0]
 	m.hidden = 0
@@ -231,6 +240,14 @@ func (m *Model) rebuildRows() {
 		for _, a := range matched {
 			m.selRows = append(m.selRows, len(m.rows))
 			m.rows = append(m.rows, row{kind: rowAgent, project: p, agent: a})
+		}
+	}
+	if prevID != "" {
+		for i, ri := range m.selRows {
+			if a := m.rows[ri].agent; a != nil && a.ID == prevID {
+				m.sel = i
+				break
+			}
 		}
 	}
 	if m.sel >= len(m.selRows) {

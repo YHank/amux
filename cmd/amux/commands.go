@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,7 +28,13 @@ func popupCmd() *cobra.Command {
 			if err != nil {
 				self = "amux"
 			}
-			return runInherit("tmux", "display-popup", "-w", width, "-h", height, "-E", self)
+			// Capture the client that is opening the popup so the eventual
+			// switch-client targets it and not the popup's throwaway client.
+			inner := shellQuote(self)
+			if client := currentClient(); client != "" {
+				inner = "AMUX_CLIENT=" + shellQuote(client) + " " + inner
+			}
+			return runInherit("tmux", "display-popup", "-w", width, "-h", height, "-E", inner)
 		},
 	}
 	cmd.Flags().StringVarP(&width, "width", "w", "85%", "popup width")
@@ -107,10 +114,13 @@ func installKeybind(key string) error {
 	if err != nil {
 		self = "amux"
 	}
-	line := fmt.Sprintf("bind-key %s run-shell '%s popup'", key, self)
+	// display-popup -e sets AMUX_CLIENT in the popup, format-expanded by tmux
+	// against the client that pressed the key — the correct outer client to
+	// switch when the user attaches from within the popup.
+	line := fmt.Sprintf("bind-key %s display-popup -w 85%% -h 85%% -e AMUX_CLIENT='#{client_name}' -E '%s'", key, self)
 
 	if existing, err := os.ReadFile(conf); err == nil {
-		if strings.Contains(string(existing), self+" popup") {
+		if strings.Contains(string(existing), "AMUX_CLIENT") && strings.Contains(string(existing), self) {
 			fmt.Println("amux keybinding already present in", conf)
 			return nil
 		}
@@ -128,4 +138,19 @@ func installKeybind(key string) error {
 	}
 	fmt.Printf("Added to %s:\n  %s\n\nReload with:  tmux source-file %s\nThen press:   <prefix> %s\n", conf, line, conf, key)
 	return nil
+}
+
+// currentClient returns the name of the tmux client in the current context, or
+// "" if none can be determined. Used to tag a popup with its invoking client.
+func currentClient() string {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{client_name}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// shellQuote wraps s in single quotes for safe use inside a `sh -c` string.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
