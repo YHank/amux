@@ -30,6 +30,7 @@ var aiTools = map[string]string{
 	"codex":  "codex",
 	"aider":  "aider",
 	"gemini": "gemini",
+	"omp":    "omp", // Oh My Pi (@oh-my-pi/pi-coding-agent) — a bun-run CLI, unrelated to oh-my-posh
 }
 
 // snapshotProcs runs one `ps` and builds an in-memory process tree.

@@ -98,7 +98,7 @@ func (m Model) renderFooter() string {
 		doneKey = fmt.Sprintf("d +%d done", m.hidden)
 	}
 	keys := []string{
-		"j/k move", "enter attach", "/ filter", doneKey, "r refresh", "q quit",
+		"j/k move", "enter attach", "/ filter", doneKey, "r refresh", "q/x quit",
 	}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""

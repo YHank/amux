@@ -8,11 +8,13 @@ import (
 	"time"
 )
 
-// Collect gathers a full snapshot: interactive agents from tmux + background
-// agents from ~/.claude/jobs, correlated and grouped by project.
+// Collect gathers a full snapshot: interactive agents from tmux, background
+// Claude Code jobs (~/.claude/jobs), and background omp daemon tasks
+// (~/.omp/run/daemons), correlated and grouped by project.
 //
-// It performs exactly one `ps`, one `tmux list-panes`, and one directory scan,
-// so a refresh is cheap enough to run on a sub-second timer.
+// It performs exactly one `ps`, one `tmux list-panes`, and a small, bounded
+// number of directory scans/globs, so a refresh is cheap enough to run on a
+// sub-second timer.
 func Collect(now time.Time) (Snapshot, error) {
 	procs, err := snapshotProcs()
 	if err != nil {
@@ -26,8 +28,13 @@ func Collect(now time.Time) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	ompBg, err := ompBackgroundAgents()
+	if err != nil {
+		return Snapshot{}, err
+	}
 
 	all := append(inter, bg...)
+	all = append(all, ompBg...)
 	snap := Snapshot{
 		Agents:   all,
 		Projects: group(all),

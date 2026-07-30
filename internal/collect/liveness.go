@@ -1,8 +1,10 @@
 package collect
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // liveShorts returns the set of daemonShort ids that currently have a live
@@ -29,4 +31,19 @@ func liveShorts() map[string]bool {
 		}
 	}
 	return live
+}
+
+// processAlive reports whether pid currently exists. Used for sources (like
+// omp's client registry) whose only liveness signal is a raw pid, not a socket.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	// On Unix, os.FindProcess always succeeds; signal 0 is the standard way to
+	// probe existence without actually signaling the process.
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }

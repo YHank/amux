@@ -5,11 +5,12 @@
 `amux` is a lightweight, fast TUI that unifies two things no other tool shows
 together:
 
-1. **Interactive agents** — `claude` (and `codex`/`aider`/`gemini`) running in
-   the foreground of any tmux pane, across every session.
-2. **Background agents** — headless Claude Code daemons started with the
-   `agents` command, which have **no tmux pane at all** and are otherwise
-   invisible.
+1. **Interactive agents** — `claude`, `omp` ([Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)),
+   `codex`, `aider`, `gemini` running in the foreground of any tmux pane,
+   across every session.
+2. **Background agents** — headless daemons that have **no tmux pane at all**
+   and are otherwise invisible: Claude Code jobs started with the `agents`
+   command, and Oh My Pi's own named background tasks.
 
 Both are grouped by the **project** they belong to, so a background agent shows
 up right next to the interactive session that spawned it.
@@ -44,11 +45,16 @@ working right now, what's waiting on you, and what's done — grouped by project
 
 ## Features
 
-- **Both agent kinds, one view** — tmux panes *and* `~/.claude/jobs` daemons.
+- **Both agent kinds, one view** — tmux panes *and* headless daemons
+  (`~/.claude/jobs`, `~/.omp/run/daemons`).
 - **Project grouping** — agents bucket under their git repo root.
-- **Accurate liveness** — uses the daemon's live rendezvous socket, not a
-  timestamp, so a long-running agent never looks dead and a crashed one never
-  looks alive.
+- **Accurate liveness** — background agents are checked against their daemon's
+  live process/socket, not a timestamp, so a long-running agent never looks
+  dead and a crashed one never looks alive.
+- **Working vs. idle, not just "alive"** — an interactive pane isn't just
+  "live" or not: amux reads the spinner glyph Claude Code/Oh My Pi write into
+  the pane title while actively generating, so you can tell a busy agent from
+  one that's alive but sitting at a prompt waiting for you.
 - **Active-first** — finished agents are folded away by default (`d` reveals
   them); the count is always shown, never silently dropped.
 - **Live detail** — model, tokens, CPU, age, status line, and the original task
@@ -60,11 +66,17 @@ working right now, what's waiting on you, and what's done — grouped by project
 
 ## Scope
 
-amux tracks **AI agents** — `claude` (interactive and background) plus
-`codex`/`aider`/`gemini` when they run in a pane. Ordinary shells, editors, and
-prompt sessions (e.g. `oh-my-posh` panes) are intentionally **not** listed:
-they are environment, not agents. Background-agent detail (model, tokens, task)
-is Claude-specific today.
+amux tracks **AI agents**: `claude` and `omp` (interactive and background),
+plus `codex`/`aider`/`gemini` when they run interactively in a pane. Ordinary
+shells, editors, and prompt-theme sessions (e.g. an idle `oh-my-posh` shell
+with no agent running in it) are intentionally **not** listed — they're
+environment, not agents. Model/token detail on background agents is currently
+Claude-specific; omp background tasks show name and state only.
+
+> Note: `omp` here is [Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent),
+> a full coding-agent CLI — unrelated to the `oh-my-posh` shell prompt theme
+> despite the name collision. If your tmux session naming makes that ambiguous,
+> `amux`'s `tool` field in the detail panel always disambiguates.
 
 ## Install
 
@@ -99,7 +111,7 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `/` | Filter by name, project, model, or path |
 | `d` | Show / hide finished agents |
 | `r` | Refresh now |
-| `q` | Quit |
+| `q` / `x` | Quit |
 
 ### tmux status bar
 
@@ -109,12 +121,16 @@ set -g status-right '#(amux status)'
 
 ## How it works
 
-Each 2-second refresh does exactly one `ps`, one `tmux list-panes`, and one scan
-of `~/.claude/jobs/` — no background daemon, no polling per pane. Interactive
-agents are found by walking each pane's process tree for a `claude`-family
-foreground process; background agents are read straight from each job's
-`state.json`. Liveness comes from the presence of the daemon's
-`/tmp/cc-daemon-*/*/rv/<id>.sock` rendezvous socket.
+Each 2-second refresh does exactly one `ps`, one `tmux list-panes`, and a
+handful of bounded directory scans/globs — no background daemon of its own, no
+polling per pane. Interactive agents are found by walking each pane's process
+tree for an AI-tool foreground process. Background agents are read straight
+from each source's own on-disk state:
+
+- Claude Code: `~/.claude/jobs/*/state.json`; liveness from the daemon's
+  `/tmp/cc-daemon-*/*/rv/<id>.sock` rendezvous socket.
+- Oh My Pi: `~/.omp/run/daemons/*/daemons/*/meta.json`; liveness from the
+  owning client's pid in the sibling `clients/*.json` registry.
 
 ## Requirements
 

@@ -76,7 +76,7 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 			Kind:       KindInteractive,
 			Tool:       tool,
 			Name:       pn.target,
-			Life:       LifeWorking, // a live foreground process is, by definition, live
+			Life:       interactiveLife(pn.title),
 			State:      "live",
 			Detail:     titleOrCmd(pn.title, ap),
 			CWD:        pn.path,
@@ -88,6 +88,29 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 		})
 	}
 	return agents, nil
+}
+
+// interactiveLife distinguishes an AI-tool pane that is actively generating
+// from one that's alive but idle (waiting on the user).
+//
+// Claude Code and Oh My Pi both write an animated spinner glyph as the first
+// character of the tmux pane title while actively working (e.g. "⠂ my task"),
+// and drop it once they're idle/waiting for input (e.g. "claude agents",
+// "π: my task"). The glyph is a Braille Pattern character (U+2800–U+28FF), a
+// block used exclusively for spinner animations, not real text — verified
+// live by capturing this exact pane's title mid-generation vs. an idle
+// sibling pane. Absent that signal (no title, or a tool that doesn't set one),
+// we can't confirm active generation, so default to idle rather than assuming.
+func interactiveLife(title string) Lifecycle {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return LifeIdle
+	}
+	r := []rune(t)[0]
+	if r >= 0x2800 && r <= 0x28FF {
+		return LifeWorking
+	}
+	return LifeIdle
 }
 
 // titleOrCmd prefers a meaningful pane title; otherwise falls back to the argv.

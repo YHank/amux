@@ -16,6 +16,7 @@ func TestDetectTool(t *testing.T) {
 		{"plain zsh", proc{comm: "zsh", args: "zsh"}, ""},
 		{"codex via argv0 basename", proc{comm: "node", args: "node /usr/local/bin/codex --foo"}, "codex"},
 		{"absolute claude path", proc{comm: "claude", args: "/Users/x/.local/bin/claude"}, "claude"},
+		{"omp via bun wrapper", proc{comm: "bun", args: "bun /Users/ky-han/.bun/bin/omp"}, "omp"},
 		{"unrelated node", proc{comm: "node", args: "node server.js"}, ""},
 	}
 	for _, c := range cases {
@@ -78,6 +79,25 @@ func TestModelFromFlags(t *testing.T) {
 	}
 	if got := modelFromFlags([]string{"--model"}); got != "" { // dangling flag, no value
 		t.Errorf("expected empty for dangling flag, got %q", got)
+	}
+}
+
+func TestInteractiveLife(t *testing.T) {
+	cases := []struct {
+		title string
+		want  Lifecycle
+	}{
+		{"⠂ tmux agent monitor tui", LifeWorking}, // Braille spinner (U+2802) — actively generating
+		{"⠐ claude", LifeWorking},
+		{"claude agents", LifeIdle},       // no spinner — at a menu/idle
+		{"π: tmux_agent_check", LifeIdle}, // omp idle title, no spinner
+		{"", LifeIdle},                    // no title at all
+		{"   ", LifeIdle},
+	}
+	for _, c := range cases {
+		if got := interactiveLife(c.title); got != c.want {
+			t.Errorf("interactiveLife(%q) = %q, want %q", c.title, got, c.want)
+		}
 	}
 }
 
