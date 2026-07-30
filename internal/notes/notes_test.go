@@ -59,6 +59,7 @@ func TestNilStoreIsSafe(t *testing.T) {
 	}
 	// Must not panic.
 	s.Set("x", "y")
+	s.Reload()
 	s.Prune(map[string]bool{})
 }
 
@@ -77,5 +78,58 @@ func TestLoadRoundTrip(t *testing.T) {
 	reloaded := Load()
 	if got := reloaded.Get("abc"); got != "hello" {
 		t.Errorf("reloaded value = %q, want %q", got, "hello")
+	}
+}
+
+func TestReloadObservesExternalChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.json")
+	s := &Store{path: path, m: map[string]string{"agent-1": "old note"}}
+
+	if err := os.WriteFile(path, []byte(`{"agent-1":"new note","agent-2":"also shared"}`), 0o600); err != nil {
+		t.Fatalf("writing external notes: %v", err)
+	}
+	s.Reload()
+
+	if got := s.Get("agent-1"); got != "new note" {
+		t.Errorf("reloaded note = %q, want %q", got, "new note")
+	}
+	if got := s.Get("agent-2"); got != "also shared" {
+		t.Errorf("new shared note = %q, want %q", got, "also shared")
+	}
+}
+
+func TestReloadKeepsCurrentNotesOnInvalidData(t *testing.T) {
+	for _, contents := range []string{"{not json", "null"} {
+		t.Run(contents, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "notes.json")
+			s := &Store{path: path, m: map[string]string{"agent-1": "current note"}}
+
+			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+				t.Fatalf("writing invalid notes: %v", err)
+			}
+			s.Reload()
+
+			if got := s.Get("agent-1"); got != "current note" {
+				t.Errorf("note after invalid reload = %q, want %q", got, "current note")
+			}
+		})
+	}
+}
+
+func TestSetMergesNotesFromSeparateDashboards(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.json")
+	firstDashboard := &Store{path: path, m: map[string]string{}}
+	secondDashboard := &Store{path: path, m: map[string]string{}}
+
+	firstDashboard.Set("agent-1", "first note")
+	secondDashboard.Set("agent-2", "second note")
+
+	reloaded := &Store{path: path, m: map[string]string{}}
+	reloaded.Reload()
+	if got := reloaded.Get("agent-1"); got != "first note" {
+		t.Errorf("first dashboard note = %q, want %q", got, "first note")
+	}
+	if got := reloaded.Get("agent-2"); got != "second note" {
+		t.Errorf("second dashboard note = %q, want %q", got, "second note")
 	}
 }

@@ -15,6 +15,11 @@ import (
 // refreshEvery is how often the dashboard re-scans the environment.
 const refreshEvery = 2 * time.Second
 
+// notesRefreshEvery is how often the dashboard reloads notes saved by another
+// amux instance. Agent discovery needs to be responsive; disk-backed notes do
+// not, so they refresh less frequently.
+const notesRefreshEvery = 10 * time.Second
+
 // Action is what amux should do after the TUI exits (e.g. attach to a session).
 type Action struct {
 	Kind       string // "attach" | "resume"
@@ -50,9 +55,12 @@ type Model struct {
 	showDone  bool // reveal finished (done/stopped/error) agents
 	hidden    int  // count of finished agents hidden by the current view
 
-	notesStore *notes.Store
-	naming     bool // capturing a note for the selected agent
-	noteInput  string
+	stacked         bool // render the agent list above the detail pane
+	hideDetail      bool // hide the detail pane so the list fills the viewport
+	preferencesPath string
+	notesStore      *notes.Store
+	naming          bool // capturing a note for the selected agent
+	noteInput       string
 
 	composing    bool // capturing a message to send into the selected agent's pane
 	composeInput string
@@ -62,10 +70,11 @@ type Model struct {
 	killTarget     string
 	killName       string
 
-	width, height int
-	err           error
-	loading       bool
-	lastRefresh   time.Time
+	width, height    int
+	err              error
+	loading          bool
+	lastRefresh      time.Time
+	lastNotesRefresh time.Time
 
 	action *Action // set on quit when the user chose to attach/resume
 	quit   bool
@@ -73,7 +82,23 @@ type Model struct {
 
 // New builds an initial model.
 func New() Model {
-	return Model{loading: true, notesStore: notes.Load()}
+	path := defaultPreferencesPath()
+	prefs := loadViewPreferences(path)
+	return Model{
+		loading:          true,
+		notesStore:       notes.Load(),
+		lastNotesRefresh: time.Now(),
+		preferencesPath:  path,
+		stacked:          prefs.Stacked,
+		hideDetail:       prefs.HideDetail,
+	}
+}
+
+func (m Model) persistViewPreferences() {
+	saveViewPreferences(m.preferencesPath, viewPreferences{
+		Stacked:    m.stacked,
+		HideDetail: m.hideDetail,
+	})
 }
 
 // Chosen returns the action selected before quitting, if any.
@@ -147,6 +172,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		if time.Time(msg).Sub(m.lastNotesRefresh) >= notesRefreshEvery {
+			m.notesStore.Reload()
+			m.lastNotesRefresh = time.Time(msg)
+		}
 		return m, tea.Batch(refreshCmd, tick())
 
 	case snapshotMsg:
@@ -304,6 +333,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		return m, refreshCmd
+	case "v":
+		m.stacked = !m.stacked
+		m.persistViewPreferences()
+	case "m":
+		m.hideDetail = !m.hideDetail
+		m.persistViewPreferences()
 	case "d":
 		m.showDone = !m.showDone
 		m.rebuildRows()

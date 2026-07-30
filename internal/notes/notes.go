@@ -6,8 +6,10 @@ package notes
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // Store persists agent notes as a flat agent-ID -> text map. Notes are
@@ -37,10 +39,22 @@ func Load() *Store {
 		return s
 	}
 	s.path = path
-	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &s.m)
+	if reloaded, ok := readNotes(path); ok {
+		s.m = reloaded
 	}
 	return s
+}
+
+// Reload replaces the in-memory notes with the persisted notes when the file
+// is readable and valid. It lets concurrently running dashboards observe notes
+// saved by each other without losing their current state on a transient read.
+func (s *Store) Reload() {
+	if s == nil || s.path == "" {
+		return
+	}
+	if reloaded, ok := readNotes(s.path); ok {
+		s.m = reloaded
+	}
 }
 
 // Get returns the note for id, or "" if there isn't one. Safe to call on a nil
@@ -58,12 +72,13 @@ func (s *Store) Set(id, note string) {
 	if s == nil {
 		return
 	}
-	if note == "" {
-		delete(s.m, id)
-	} else {
-		s.m[id] = note
-	}
-	s.save()
+	s.update(func(stored map[string]string) {
+		if note == "" {
+			delete(stored, id)
+		} else {
+			stored[id] = note
+		}
+	})
 }
 
 // Prune drops notes for agent IDs no longer present in liveIDs, so notes.json
@@ -73,31 +88,91 @@ func (s *Store) Prune(liveIDs map[string]bool) {
 	if s == nil {
 		return
 	}
-	changed := false
-	for id := range s.m {
-		if !liveIDs[id] {
-			delete(s.m, id)
-			changed = true
+	s.update(func(stored map[string]string) {
+		for id := range stored {
+			if !liveIDs[id] {
+				delete(stored, id)
+			}
 		}
-	}
-	if changed {
-		s.save()
-	}
+	})
 }
 
-// save writes the current map to disk. Errors are swallowed for the same
-// reason resolution failures are: a note is a nice-to-have, never a reason to
-// disrupt the dashboard.
-func (s *Store) save() {
+// update performs a disk-backed read-modify-write operation under an advisory
+// lock. Each dashboard therefore applies its mutation to the latest persisted
+// map rather than overwriting notes written since its last Reload.
+func (s *Store) update(mutate func(map[string]string)) {
+	if s.m == nil {
+		s.m = map[string]string{}
+	}
 	if s.path == "" {
+		mutate(s.m)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return
 	}
-	data, err := json.MarshalIndent(s.m, "", "  ")
+
+	lock, err := os.OpenFile(s.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(s.path, data, 0o600)
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+
+	stored, ok := readNotes(s.path)
+	if !ok {
+		return
+	}
+	mutate(stored)
+	if !writeNotes(s.path, stored) {
+		return
+	}
+	s.m = stored
+}
+
+// readNotes reads a complete persisted map. A missing file is an empty store;
+// unreadable, malformed, and null data are rejected without altering callers.
+func readNotes(path string) (map[string]string, bool) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]string{}, true
+	}
+	if err != nil {
+		return nil, false
+	}
+	stored := map[string]string{}
+	if err := json.Unmarshal(data, &stored); err != nil || stored == nil {
+		return nil, false
+	}
+	return stored, true
+}
+
+// writeNotes atomically replaces the notes file, so readers see either the old
+// complete map or the new complete map, never a partially written JSON file.
+func writeNotes(path string, stored map[string]string) bool {
+	data, err := json.MarshalIndent(stored, "", "  ")
+	if err != nil {
+		return false
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".notes-*.tmp")
+	if err != nil {
+		return false
+	}
+	tempPath := file.Name()
+	defer os.Remove(tempPath)
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return false
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return false
+	}
+	if err := file.Close(); err != nil {
+		return false
+	}
+	return os.Rename(tempPath, path) == nil
 }

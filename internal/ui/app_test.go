@@ -1,11 +1,16 @@
 package ui
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/kyhan/amux/internal/collect"
+	"github.com/kyhan/amux/internal/notes"
 )
 
 func mkAgent(id string, life collect.Lifecycle) collect.Agent {
@@ -231,5 +236,62 @@ func TestKillConfirmRequiresY(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("y should trigger the kill command")
+	}
+}
+
+func TestViewTogglesPersistState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	m := Model{preferencesPath: path}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	m = next.(Model)
+	if !m.stacked {
+		t.Fatal("v should enable stacked layout")
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m = next.(Model)
+	if !m.hideDetail {
+		t.Fatal("m should hide the detail pane")
+	}
+	if got, want := loadViewPreferences(path), (viewPreferences{Stacked: true, HideDetail: true}); got != want {
+		t.Fatalf("saved preferences = %#v, want %#v", got, want)
+	}
+}
+
+func TestSideBySideViewFitsTerminalWidth(t *testing.T) {
+	m := Model{
+		snap:   projSnap(mkAgent("a", collect.LifeWorking)),
+		width:  80,
+		height: 24,
+	}
+	m.rebuildRows()
+	for _, line := range strings.Split(m.View(), "\n") {
+		if got := lipgloss.Width(line); got > m.width {
+			t.Fatalf("side-by-side line width = %d, want at most %d: %q", got, m.width, line)
+		}
+	}
+}
+
+func TestDashboardReloadsSharedNotesEveryTenSeconds(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	m := New()
+	otherDashboard := notes.Load()
+	otherDashboard.Set("agent-1", "shared note")
+
+	start := time.Now()
+	m.lastNotesRefresh = start
+	next, _ := m.Update(tickMsg(start.Add(notesRefreshEvery - time.Nanosecond)))
+	m = next.(Model)
+	if got := m.notesStore.Get("agent-1"); got != "" {
+		t.Fatalf("note reloaded before interval: %q", got)
+	}
+
+	next, _ = m.Update(tickMsg(start.Add(notesRefreshEvery)))
+	m = next.(Model)
+	if got := m.notesStore.Get("agent-1"); got != "shared note" {
+		t.Errorf("reloaded note = %q, want shared note", got)
 	}
 }
