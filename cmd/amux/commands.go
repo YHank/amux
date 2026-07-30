@@ -104,7 +104,18 @@ func setupKeybindCmd() *cobra.Command {
 	}
 }
 
+// keybindMarker prefixes the comment line amux writes above its own
+// bind-key line in ~/.tmux.conf. It's the stable identifier used to find and
+// replace a previous amux binding on a later setup-keybind run — matching on
+// it alone (not also on the executable path) so re-running after amux was
+// moved or upgraded updates the existing line in place instead of leaving a
+// stale, unmatched one behind and appending a duplicate next to it.
+const keybindMarker = "# amux-keybind"
+
 func installKeybind(key string) error {
+	if !validKeySpec(key) {
+		return fmt.Errorf("invalid key %q: must not contain whitespace, quotes, backslashes, or ;", key)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -116,12 +127,23 @@ func installKeybind(key string) error {
 	}
 	// display-popup -e sets AMUX_CLIENT in the popup, format-expanded by tmux
 	// against the client that pressed the key — the correct outer client to
-	// switch when the user attaches from within the popup.
-	line := fmt.Sprintf("bind-key %s display-popup -w 85%% -h 85%% -e AMUX_CLIENT='#{client_name}' -E '%s'", key, self)
+	// switch when the user attaches from within the popup. self is double-
+	// quoted via tmuxDQuote, not wrapped in literal single quotes: tmux's
+	// config lexer has no escape for a single quote inside a single-quoted
+	// token, so a path containing one (e.g. an account named "o'brien")
+	// would end the quote early and corrupt the rest of the file — verified
+	// live against a real tmux instance, where exactly that shape spilled
+	// into and swallowed the following config line.
+	line := fmt.Sprintf("bind-key %s display-popup -w 85%% -h 85%% -e AMUX_CLIENT='#{client_name}' -E %s",
+		key, tmuxDQuote(self))
+	block := keybindMarker + " — AI agent tracker popup\n" + line + "\n"
 
 	if existing, err := os.ReadFile(conf); err == nil {
-		if strings.Contains(string(existing), "AMUX_CLIENT") && strings.Contains(string(existing), self) {
-			fmt.Println("amux keybinding already present in", conf)
+		if updated, replaced := replaceMarkedBlock(string(existing), keybindMarker, block); replaced {
+			if err := os.WriteFile(conf, []byte(updated), 0o644); err != nil {
+				return err
+			}
+			fmt.Printf("Updated %s:\n  %s\n\nReload with:  tmux source-file %s\nThen press:   <prefix> %s\n", conf, line, conf, key)
 			return nil
 		}
 	}
@@ -132,12 +154,58 @@ func installKeybind(key string) error {
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
-	fmt.Fprintf(w, "\n# amux — AI agent tracker popup\n%s\n", line)
+	fmt.Fprintf(w, "\n%s", block)
 	if err := w.Flush(); err != nil {
 		return err
 	}
 	fmt.Printf("Added to %s:\n  %s\n\nReload with:  tmux source-file %s\nThen press:   <prefix> %s\n", conf, line, conf, key)
 	return nil
+}
+
+// replaceMarkedBlock finds the line starting with marker in content and
+// replaces it and the line right after it (the marker's own comment + the
+// bind-key line it describes) with block. Reports false, unchanged, if the
+// marker isn't present, so the caller falls back to appending.
+func replaceMarkedBlock(content, marker, block string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	for i, l := range lines {
+		if !strings.HasPrefix(l, marker) {
+			continue
+		}
+		end := i + 2 // the marker/comment line plus the bind-key line after it
+		if end > len(lines) {
+			end = len(lines)
+		}
+		newLines := strings.Split(strings.TrimRight(block, "\n"), "\n")
+		result := append([]string{}, lines[:i]...)
+		result = append(result, newLines...)
+		result = append(result, lines[end:]...)
+		return strings.Join(result, "\n"), true
+	}
+	return content, false
+}
+
+// validKeySpec reports whether key is safe to splice, unquoted, into a
+// tmux.conf bind-key line as the key token. A real tmux key name never
+// contains whitespace, quote characters, a backslash, or `;` (tmux's command
+// separator) — rejecting those outright is simpler and safer than trying to
+// quote a token that isn't supposed to be a quoted string in the first place.
+func validKeySpec(key string) bool {
+	return key != "" && !strings.ContainsAny(key, " \t\n\r'\"\\;")
+}
+
+// tmuxDQuote wraps s in tmux config-file double quotes, escaping backslashes
+// and double quotes the way tmux's own config lexer expects (backslash-escape,
+// same as a POSIX shell double-quoted string). Verified live against a real
+// tmux instance for embedded ', ", \, and all three combined — tmux's
+// single-quoted strings have no escape for an embedded single quote at all,
+// so a single-quote-wrapped value containing one is not just wrong but
+// actively corrupts the rest of the config file (confirmed: it swallowed the
+// following line whole). Double-quoting sidesteps that entirely.
+func tmuxDQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`
 }
 
 // currentClient returns the name of the tmux client in the current context, or
