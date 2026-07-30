@@ -132,6 +132,8 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `i` | Add / edit a note on the selected agent |
 | `d` | Show / hide finished agents |
 | `r` | Refresh now |
+| `v` | Toggle the list/detail panes between side-by-side and top/bottom layouts |
+| `m` | Show / hide the detail and terminal-preview pane |
 | `q` | Quit |
 
 ### tmux status bar

@@ -15,38 +15,82 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "loading amux…"
 	}
+	if m.height < 5 || m.width < 20 {
+		return m.renderTooSmall()
+	}
 	if m.loading && len(m.snap.Agents) == 0 {
 		return "scanning for AI agents…"
 	}
 
 	header := m.renderHeader()
 	footer := m.renderFooter()
-
-	// Reserve one line for header, one for footer, one blank separator.
-	bodyH := m.height - 3
-	if bodyH < 3 {
-		bodyH = 3
+	bodyH := m.height - 2
+	if m.hideDetail {
+		return header + "\n" + fitPane(m.renderList(m.width, bodyH), m.width, bodyH) + "\n" + footer
+	}
+	if m.stacked {
+		return m.renderStackedBody(header, footer, bodyH)
 	}
 
-	listW := m.width * 40 / 100
-	if listW < 28 {
-		listW = 28
+	availableW := m.width - 2 // vline renders a leading space plus the divider glyph.
+	listW := availableW * 40 / 100
+	if listW < 1 {
+		listW = 1
 	}
-	detailW := m.width - listW - 3
-	if detailW < 20 {
-		detailW = 20
+	if listW >= availableW {
+		listW = availableW - 1
 	}
-
-	list := m.renderList(listW, bodyH)
-	detail := m.renderDetail(detailW, bodyH)
-
+	detailW := availableW - listW
+	list := fitPane(m.renderList(listW, bodyH), listW, bodyH)
+	detail := fitPane(m.renderDetail(detailW, bodyH), detailW, bodyH)
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(listW).Height(bodyH).Render(list),
+		list,
 		styleDivider.Render(vline(bodyH)),
-		lipgloss.NewStyle().Width(detailW).Height(bodyH).Render(detail),
+		detail,
 	)
-
 	return header + "\n" + body + "\n" + footer
+}
+
+func (m Model) renderTooSmall() string {
+	lines := []string{truncateWidth("amux", m.width)}
+	if m.height > 1 {
+		lines = append(lines, truncateWidth("v/m", m.width))
+	}
+	if m.height > 2 {
+		lines = append(lines, truncateWidth("terminal too small", m.width))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderStackedBody(header, footer string, bodyH int) string {
+	listH := (bodyH - 1) * 35 / 100
+	if listH < 1 {
+		listH = 1
+	}
+	detailH := bodyH - listH - 1
+	if detailH < 1 {
+		detailH = 1
+		listH = bodyH - detailH - 1
+	}
+	list := fitPane(m.renderList(m.width, listH), m.width, listH)
+	detail := fitPane(m.renderDetail(m.width, detailH), m.width, detailH)
+	divider := styleDivider.Render(strings.Repeat("─", m.width))
+	return header + "\n" + list + "\n" + divider + "\n" + detail + "\n" + footer
+}
+
+func fitPane(content string, width, height int) string {
+	return lipgloss.NewStyle().Width(width).Height(height).Render(clipLines(content, height))
+}
+
+func clipLines(content string, maxLines int) string {
+	if maxLines <= 0 {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func vline(h int) string {
@@ -91,24 +135,24 @@ func (m Model) renderHeader() string {
 
 func (m Model) renderFooter() string {
 	if m.confirmingKill {
-		return lipgloss.NewStyle().Foreground(cRed).Bold(true).Render("kill "+m.killName+"?") +
-			styleFaint.Render("  y to confirm · any other key cancels")
+		return truncateWidth(lipgloss.NewStyle().Foreground(cRed).Bold(true).Render("kill "+m.killName+"?")+
+			styleFaint.Render("  y to confirm · any other key cancels"), m.width)
 	}
 	if m.composing {
-		return styleTitle.Render("send: ") + m.composeInput + styleFaint.Render("▏  (enter to send · esc to cancel)")
+		return truncateWidth(styleTitle.Render("send: ")+m.composeInput+styleFaint.Render("▏  (enter to send · esc to cancel)"), m.width)
 	}
 	if m.naming {
-		return styleTitle.Render("note: ") + m.noteInput + styleFaint.Render("▏  (enter to save · esc to cancel)")
+		return truncateWidth(styleTitle.Render("note: ")+m.noteInput+styleFaint.Render("▏  (enter to save · esc to cancel)"), m.width)
 	}
 	if m.filtering {
-		return styleTitle.Render("/") + m.filter + styleFaint.Render("▏  (enter to apply · esc to clear)")
+		return truncateWidth(styleTitle.Render("/")+m.filter+styleFaint.Render("▏  (enter to apply · esc to clear)"), m.width)
 	}
 	doneKey := "d done"
 	if m.hidden > 0 && !m.showDone {
 		doneKey = fmt.Sprintf("d +%d done", m.hidden)
 	}
 	keys := []string{
-		"j/k move", "enter attach", "c send", "x kill", "/ filter", "i note", doneKey, "r refresh", "q quit",
+		"j/k move", "enter attach", "c send", "x kill", "/ filter", "i note", doneKey, "v layout", "m preview", "q quit",
 	}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
@@ -133,7 +177,7 @@ func (m Model) renderFooter() string {
 			gap = 1
 		}
 	}
-	return help + strings.Repeat(" ", gap) + stamp
+	return truncateWidth(help+strings.Repeat(" ", gap)+stamp, m.width)
 }
 
 func (m Model) renderList(w, h int) string {
