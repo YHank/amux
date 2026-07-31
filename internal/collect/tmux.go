@@ -79,10 +79,10 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 		tool := detectTool(ap)
 		preview := capturePane(pn.target, previewLines)
 		life := interactiveLife(pn.title)
-		if life == LifeIdle && contentShowsSpinner(preview) {
+		if life == LifeIdle && contentShowsSpinner(tool, preview) {
 			life = LifeWorking
 		}
-		needsInput := looksLikeChoicePrompt(preview)
+		needsInput := looksLikeChoicePrompt(tool, preview)
 		if needsInput {
 			life = LifeInput
 		}
@@ -145,22 +145,15 @@ func stripANSI(s string) string {
 const choicePromptScanLines = 8
 
 // looksLikeChoicePrompt reports whether the captured pane content shows the
-// agent mid-question, blocked on the user picking one of several options —
-// e.g. Claude Code's AskUserQuestion UI:
+// agent mid-question, blocked on the user picking one of several options.
+// Verified footers currently include Claude Code's
+// "Enter to select · ↑/↓ to navigate · Esc to cancel" and OpenCode's
+// "↑↓ select  enter submit  esc dismiss".
 //
-//	 ☐ Choice
-//	Pick A or B?
-//	❯ 1. A
-//	  2. B
-//	Enter to select · ↑/↓ to navigate · Esc to cancel
-//
-// The footer line is the signal: verified live against a real pending
-// question (captured mid-prompt) and against ordinary idle/typing screens
-// (which use the same "❯ " cursor glyph but never this footer), so matching
-// on it avoids false positives from "❯ " alone. This is intentionally
-// conservative — dialects of this UI or other tools' own approval prompts that
-// phrase their footer differently won't be caught.
-func looksLikeChoicePrompt(lines []string) bool {
+// The footer is the signal: ordinary idle/typing screens share prompt glyphs
+// and words with question screens but not the full interaction instructions.
+// Matching the complete instruction combination keeps detection conservative.
+func looksLikeChoicePrompt(tool string, lines []string) bool {
 	tail := lines
 	if len(tail) > choicePromptScanLines {
 		tail = tail[len(tail)-choicePromptScanLines:]
@@ -169,6 +162,14 @@ func looksLikeChoicePrompt(lines []string) bool {
 		plain := stripANSI(l)
 		if strings.Contains(plain, "Enter to select") && strings.Contains(plain, "navigate") {
 			return true
+		}
+		if tool == "opencode" {
+			lower := strings.ToLower(plain)
+			if strings.Contains(lower, "↑↓ select") &&
+				strings.Contains(lower, "enter submit") &&
+				strings.Contains(lower, "esc dismiss") {
+				return true
+			}
 		}
 	}
 	return false
@@ -213,14 +214,14 @@ func interactiveLife(title string) Lifecycle {
 // screen, not buried in scrollback.
 const contentSpinnerScanLines = 10
 
-// contentShowsSpinner reports whether any of the trailing lines starts with a
-// spinner glyph once ANSI codes are stripped. Oh My Pi renders its working
-// indicator as an ordinary line in the pane body — e.g.
-// "⠦ Creating Claude config guide ⟨esc⟩" — never in the tmux title, so title
-// alone (interactiveLife) leaves every omp pane looking idle regardless of
-// whether it's actually working. Verified live against two real omp panes
-// caught mid-task.
-func contentShowsSpinner(lines []string) bool {
+// contentShowsSpinner reports whether the trailing pane content contains a
+// verified working indicator. Oh My Pi renders a Braille spinner as the first
+// visible character of an ordinary line (for example, "⠦ Creating Claude
+// config guide ⟨esc⟩"). OpenCode keeps its spinner inside a bordered command
+// row, but renders "esc interrupt" in the active-task footer. Neither tool puts
+// its working signal in the tmux title, so title-only detection would leave
+// both looking idle while they work.
+func contentShowsSpinner(tool string, lines []string) bool {
 	tail := lines
 	if len(tail) > contentSpinnerScanLines {
 		tail = tail[len(tail)-contentSpinnerScanLines:]
@@ -229,6 +230,12 @@ func contentShowsSpinner(lines []string) bool {
 		plain := strings.TrimSpace(stripANSI(l))
 		if plain == "" {
 			continue
+		}
+		// Verified live against OpenCode 1.18.5. Keep the full two-word
+		// footer marker and scope it to OpenCode: either word alone is
+		// ordinary terminal content, including in other agent panes.
+		if tool == "opencode" && strings.Contains(strings.ToLower(plain), "esc interrupt") {
+			return true
 		}
 		if isSpinnerGlyph([]rune(plain)[0]) {
 			return true

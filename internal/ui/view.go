@@ -236,7 +236,7 @@ func (m Model) renderAgentRow(a *collect.Agent, w int, selected bool, now time.T
 	glyph := lipgloss.NewStyle().Foreground(lifeColor(a.Life)).Render(lifeGlyph(a.Life))
 	kind := styleFaint.Render(kindGlyph(a.Kind))
 
-	name := a.Name
+	name := agentRowName(a)
 	nameStyle := stylePanel
 	if selected {
 		nameStyle = styleSel
@@ -266,6 +266,15 @@ func (m Model) renderAgentRow(a *collect.Agent, w int, selected bool, now time.T
 		}
 	}
 	return left + strings.Repeat(" ", gap) + metaR
+}
+
+func agentRowName(a *collect.Agent) string {
+	name := a.Name
+	tool := strings.TrimSpace(a.Tool)
+	if tool == "" || strings.Contains(strings.ToLower(name), strings.ToLower(tool)) {
+		return name
+	}
+	return tool + " · " + name
 }
 
 // agentMeta builds the compact right-hand metadata string for a row.

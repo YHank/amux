@@ -1,8 +1,9 @@
 // Package collect gathers the live state of AI coding agents from two disjoint
 // sources and correlates them into a single project-grouped snapshot:
 //
-//  1. Interactive agents  — a `claude`/`codex`/`aider`/`gemini` process running
-//     in the foreground of a tmux pane. These are visible via `tmux list-panes`
+//  1. Interactive agents  — a supported AI CLI process (`claude`, `omp`,
+//     `opencode`, `codex`, `aider`, or `gemini`) running in the foreground of
+//     a tmux pane. These are visible via `tmux list-panes`
 //     plus a process-tree walk.
 //  2. Background agents    — headless Claude Code daemons launched with the
 //     `agents` command. These have NO tmux pane; their state lives on disk in
@@ -51,7 +52,7 @@ func (l Lifecycle) Terminal() bool {
 type Agent struct {
 	ID   string // stable id: sessionId (background) or tmux pane id (interactive)
 	Kind Kind
-	Tool string // claude | codex | aider | gemini
+	Tool string // claude | omp | opencode | codex | aider | gemini
 
 	Name  string    // job name, or "session:win.pane" for interactive
 	Model string    // e.g. sonnet, opus[1m] (background only)

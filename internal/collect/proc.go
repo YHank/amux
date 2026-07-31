@@ -26,11 +26,13 @@ type procTable struct {
 
 // aiTools maps a detectable command name to its canonical tool label.
 var aiTools = map[string]string{
-	"claude": "claude",
-	"codex":  "codex",
-	"aider":  "aider",
-	"gemini": "gemini",
-	"omp":    "omp", // Oh My Pi (@oh-my-pi/pi-coding-agent) — a bun-run CLI, unrelated to oh-my-posh
+	"claude":       "claude",
+	"codex":        "codex",
+	"aider":        "aider",
+	"gemini":       "gemini",
+	"omp":          "omp", // Oh My Pi (@oh-my-pi/pi-coding-agent) — a bun-run CLI, unrelated to oh-my-posh
+	"opencode":     "opencode",
+	"opencode.exe": "opencode",
 }
 
 // snapshotProcs runs one `ps` and builds an in-memory process tree.
@@ -85,9 +87,8 @@ func trimNFields(line string, n int) string {
 }
 
 // detectTool reports the AI tool a process represents, or "" if none.
-// It checks the comm basename first, then the first argv token, so both
-// `claude` and `/path/to/claude agents` and `node .../codex` style launches
-// are caught.
+// It checks the executable basename first, then a conservative interpreter
+// wrapper shape such as `node /path/to/codex` or `bun /path/to/omp`.
 func detectTool(p proc) string {
 	if tool, ok := aiTools[base(p.comm)]; ok {
 		return tool
@@ -98,13 +99,8 @@ func detectTool(p proc) string {
 			return tool
 		}
 	}
-	// Interpreted CLIs (codex/aider) may show up as `node`/`python` with the
-	// tool name embedded in a later arg. Match on a word boundary to avoid
-	// false positives from unrelated paths.
-	for name, tool := range aiTools {
-		if containsCmd(p.args, name) {
-			return tool
-		}
+	if tool := wrappedTool(p.args); tool != "" {
+		return tool
 	}
 	return ""
 }
@@ -159,13 +155,24 @@ func firstToken(s string) string {
 	return s
 }
 
-// containsCmd reports whether name appears in args as a standalone command
-// token (surrounded by whitespace or a path separator), not as a substring.
-func containsCmd(args, name string) bool {
-	for _, tok := range strings.Fields(args) {
-		if base(tok) == name {
-			return true
-		}
+// wrappedTool recognizes AI CLIs launched through a known interpreter. Only
+// the first non-flag argument can be the script/module; later filename or
+// message arguments must never turn an ordinary process into an agent.
+func wrappedTool(args string) string {
+	fields := strings.Fields(args)
+	if len(fields) < 2 {
+		return ""
 	}
-	return false
+	switch base(fields[0]) {
+	case "node", "node.exe", "bun", "bun.exe", "python", "python3", "python.exe":
+	default:
+		return ""
+	}
+	for _, tok := range fields[1:] {
+		if strings.HasPrefix(tok, "-") {
+			continue
+		}
+		return aiTools[base(tok)]
+	}
+	return ""
 }

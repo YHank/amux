@@ -264,6 +264,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.notesStore.Set(a.ID, strings.TrimSpace(m.noteInput))
 			}
 			m.naming = false
+			m.rebuildRows()
 		case tea.KeyEsc:
 			m.naming = false
 			m.noteInput = ""
@@ -412,7 +413,7 @@ func (m *Model) rebuildRows() {
 		var matched []*collect.Agent
 		for j := range p.Agents {
 			a := &p.Agents[j]
-			if f != "" && !agentMatches(a, p, f) {
+			if f != "" && !agentMatches(a, p, m.notesStore.Get(a.ID), f) {
 				continue
 			}
 			// Finished agents are hidden unless explicitly revealed; keep a
@@ -448,10 +449,12 @@ func (m *Model) rebuildRows() {
 	}
 }
 
-func agentMatches(a *collect.Agent, p *collect.Project, f string) bool {
+func agentMatches(a *collect.Agent, p *collect.Project, note, f string) bool {
 	return strings.Contains(strings.ToLower(a.Name), f) ||
 		strings.Contains(strings.ToLower(a.Detail), f) ||
+		strings.Contains(strings.ToLower(a.Tool), f) ||
 		strings.Contains(strings.ToLower(a.Model), f) ||
 		strings.Contains(strings.ToLower(p.Name), f) ||
-		strings.Contains(strings.ToLower(a.CWD), f)
+		strings.Contains(strings.ToLower(a.CWD), f) ||
+		strings.Contains(strings.ToLower(note), f)
 }

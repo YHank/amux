@@ -17,7 +17,12 @@ func TestDetectTool(t *testing.T) {
 		{"codex via argv0 basename", proc{comm: "node", args: "node /usr/local/bin/codex --foo"}, "codex"},
 		{"absolute claude path", proc{comm: "claude", args: "/Users/x/.local/bin/claude"}, "claude"},
 		{"omp via bun wrapper", proc{comm: "bun", args: "bun /Users/x/.bun/bin/omp"}, "omp"},
+		{"opencode foreground", proc{comm: "opencode", args: "opencode"}, "opencode"},
+		{"opencode executable suffix", proc{comm: "opencode.exe", args: "opencode.exe"}, "opencode"},
+		{"opencode absolute argv", proc{comm: "bun", args: "/opt/homebrew/bin/opencode"}, "opencode"},
 		{"unrelated node", proc{comm: "node", args: "node server.js"}, ""},
+		{"ordinary filename named opencode", proc{comm: "cat", args: "cat /tmp/opencode"}, ""},
+		{"later node argument named opencode", proc{comm: "node", args: "node server.js opencode"}, ""},
 	}
 	for _, c := range cases {
 		if got := detectTool(c.p); got != c.want {
@@ -117,8 +122,24 @@ func TestLooksLikeChoicePrompt(t *testing.T) {
 		"────────────────────────────────────────",
 		"Enter to select · ↑/↓ to navigate · Esc to cancel",
 	}
-	if !looksLikeChoicePrompt(pending) {
+	if !looksLikeChoicePrompt("claude", pending) {
 		t.Error("expected pending choice prompt to be detected")
+	}
+
+	// Verified live against OpenCode 1.18.5's question tool.
+	openCodePending := []string{
+		"Alpha와 Beta 중 하나를 선택해 주세요.",
+		"",
+		"1. Alpha",
+		"   Alpha를 선택합니다.",
+		"2. Beta",
+		"   Beta를 선택합니다.",
+		"3. Type your own answer",
+		"",
+		"↑↓ select  enter submit  esc dismiss",
+	}
+	if !looksLikeChoicePrompt("opencode", openCodePending) {
+		t.Error("expected OpenCode question prompt to be detected")
 	}
 
 	// The bare "❯ " cursor glyph alone appears in ordinary idle/typing
@@ -129,7 +150,7 @@ func TestLooksLikeChoicePrompt(t *testing.T) {
 		"──────────────────────────────",
 		"  enter to open · space to reply · ctrl+x to delete · ? for shortcuts",
 	}
-	if looksLikeChoicePrompt(idleTyping) {
+	if looksLikeChoicePrompt("claude", idleTyping) {
 		t.Error("idle typing prompt (bare ❯, no choice footer) must not match")
 	}
 
@@ -140,11 +161,11 @@ func TestLooksLikeChoicePrompt(t *testing.T) {
 		"",
 		"✽ Pouncing… (4s · ↓ 75 tokens · thought for 2s)",
 	}
-	if looksLikeChoicePrompt(working) {
+	if looksLikeChoicePrompt("claude", working) {
 		t.Error("actively-working screen must not match")
 	}
 
-	if looksLikeChoicePrompt(nil) {
+	if looksLikeChoicePrompt("claude", nil) {
 		t.Error("nil lines must not match")
 	}
 }
@@ -163,14 +184,19 @@ func TestLooksLikeChoicePromptIgnoresScrollbackMentions(t *testing.T) {
 	lines = append(lines, "❯ ")
 	lines = append(lines, "working normally, nothing pending")
 
-	if looksLikeChoicePrompt(lines) {
+	if looksLikeChoicePrompt("claude", lines) {
 		t.Error("marker text buried in scrollback (not the current bottom of screen) must not match")
 	}
 
 	// Sanity: the same marker at the actual bottom still matches.
 	lines[len(lines)-1] = "Enter to select · ↑/↓ to navigate · Esc to cancel"
-	if !looksLikeChoicePrompt(lines) {
+	if !looksLikeChoicePrompt("claude", lines) {
 		t.Error("marker text at the current bottom of screen should still match")
+	}
+
+	lines[len(lines)-1] = "↑↓ select  enter submit  esc dismiss"
+	if !looksLikeChoicePrompt("opencode", lines) {
+		t.Error("OpenCode question footer at the current bottom should match")
 	}
 }
 
@@ -184,8 +210,20 @@ func TestLooksLikeChoicePromptStripsANSI(t *testing.T) {
 		"  2. B",
 		"\x1b[38;5;240mEnter to select · ↑/↓ to navigate · Esc to cancel\x1b[0m",
 	}
-	if !looksLikeChoicePrompt(colored) {
+	if !looksLikeChoicePrompt("claude", colored) {
 		t.Error("choice prompt wrapped in ANSI color codes should still be detected")
+	}
+
+	openCodeColored := []string{
+		"1. Alpha",
+		"2. Beta",
+		"\x1b[38;5;240m↑↓ select  enter submit  esc dismiss\x1b[0m",
+	}
+	if !looksLikeChoicePrompt("opencode", openCodeColored) {
+		t.Error("ANSI-wrapped OpenCode question footer should be detected")
+	}
+	if looksLikeChoicePrompt("claude", openCodeColored) {
+		t.Error("OpenCode question footer must not affect a Claude pane")
 	}
 }
 
@@ -205,15 +243,36 @@ func TestContentShowsSpinner(t *testing.T) {
 		" Todos", "  Review · 0/2", "",
 		" ⠸ Running Go test suite ⟨esc⟩", "",
 	}
-	if !contentShowsSpinner(working1) {
+	if !contentShowsSpinner("omp", working1) {
 		t.Error("expected omp's in-body spinner line to be detected")
 	}
 	working2 := []string{
 		"╰──────────────╯", "",
 		" ⠦ Creating Claude config guide ⟨esc⟩", "",
 	}
-	if !contentShowsSpinner(working2) {
+	if !contentShowsSpinner("omp", working2) {
 		t.Error("expected second omp spinner fixture to be detected")
+	}
+
+	// Real OpenCode 1.18.5 fixture captured live mid-task. Its spinner sits
+	// inside a bordered row, while the footer supplies the stable working marker.
+	openCodeWorking := []string{
+		"  ┃  ⠸ python3 download.py --start 1 --end 99999",
+		"  ┃",
+		"  ⬝⬝⬝⬝■■■■  esc interrupt      60.7K (12%)  ctrl+p commands  • OpenCode 1.18.5",
+	}
+	if !contentShowsSpinner("opencode", openCodeWorking) {
+		t.Error("expected OpenCode's active-task footer to be detected")
+	}
+
+	openCodeColored := []string{
+		"\x1b[38;5;240m  ⬝⬝■■  esc interrupt\x1b[0m",
+	}
+	if !contentShowsSpinner("opencode", openCodeColored) {
+		t.Error("expected ANSI-wrapped OpenCode footer to be detected")
+	}
+	if contentShowsSpinner("claude", openCodeWorking) {
+		t.Error("OpenCode footer must not mark a Claude pane as working")
 	}
 
 	// Real omp idle fixture: static "π: <task>" title context, no spinner
@@ -222,8 +281,18 @@ func TestContentShowsSpinner(t *testing.T) {
 		"", "Recent sessions", "No recent sessions", "",
 		"╭──     GPT-5.6-Terra++ · low   ─────────────────────────────╮",
 	}
-	if contentShowsSpinner(idle) {
+	if contentShowsSpinner("omp", idle) {
 		t.Error("idle omp content must not be detected as working")
+	}
+
+	openCodeIdle := []string{
+		"  ┃",
+		"  ┃",
+		"  Hephaestus - Deep Agent · GPT-5.6 Terra Fast OpenAI · high",
+		"  60.7K (12%)  ctrl+p commands  • OpenCode 1.18.5",
+	}
+	if contentShowsSpinner("opencode", openCodeIdle) {
+		t.Error("idle OpenCode content must not be detected as working")
 	}
 
 	// Scrollback guard: a spinner line buried above the scan window must not
@@ -236,8 +305,20 @@ func TestContentShowsSpinner(t *testing.T) {
 			buried[i] = "filler"
 		}
 	}
-	if contentShowsSpinner(buried) {
+	if contentShowsSpinner("omp", buried) {
 		t.Error("a spinner line outside the trailing scan window must not match")
+	}
+
+	openCodeBuried := append([]string{"⬝⬝■■  esc interrupt"},
+		make([]string, 15)...)
+	openCodeBuried = append(openCodeBuried, "ordinary OpenCode idle footer")
+	for i := range openCodeBuried {
+		if openCodeBuried[i] == "" {
+			openCodeBuried[i] = "filler"
+		}
+	}
+	if contentShowsSpinner("opencode", openCodeBuried) {
+		t.Error("an OpenCode working footer outside the trailing scan window must not match")
 	}
 }
 

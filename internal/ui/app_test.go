@@ -74,6 +74,67 @@ func projSnap(agents ...collect.Agent) collect.Snapshot {
 	return collect.Snapshot{Projects: []collect.Project{{Key: "/p", Name: "p", Agents: agents}}}
 }
 
+func TestSlashFilterMatchesSavedNotes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	store := notes.Load()
+	store.Set("b", "Release blocker 메모")
+	m := Model{
+		snap:       projSnap(mkAgent("a", collect.LifeWorking), mkAgent("b", collect.LifeIdle)),
+		notesStore: store,
+	}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("release")})
+	m = next.(Model)
+
+	if len(m.selRows) != 1 {
+		t.Fatalf("note filter matched %d agents, want 1", len(m.selRows))
+	}
+	if got := m.selectedAgent(); got == nil || got.ID != "b" {
+		t.Errorf("note filter selected %v, want agent b", got)
+	}
+
+	// Editing away the only matching note must update the active filter
+	// immediately, without waiting for the next agent refresh.
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	m.noteInput = "different note"
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if len(m.selRows) != 0 {
+		t.Errorf("edited note left %d stale filter matches, want 0", len(m.selRows))
+	}
+}
+
+func TestSlashFilterMatchesToolWhenPaneNameDiffers(t *testing.T) {
+	openCode := mkAgent("open", collect.LifeWorking)
+	openCode.Name = "omp-776820fb:3.0"
+	openCode.Tool = "opencode"
+	omp := mkAgent("omp", collect.LifeWorking)
+	omp.Name = "omp-776820fb:4.0"
+	omp.Tool = "omp"
+
+	m := Model{snap: projSnap(openCode, omp)}
+	m.rebuildRows()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("opencode")})
+	m = next.(Model)
+
+	if len(m.selRows) != 1 {
+		t.Fatalf("tool filter matched %d agents, want 1", len(m.selRows))
+	}
+	if got := m.selectedAgent(); got == nil || got.ID != "open" {
+		t.Errorf("tool filter selected %v, want OpenCode agent", got)
+	}
+	if got := agentRowName(m.selectedAgent()); got != "opencode · omp-776820fb:3.0" {
+		t.Errorf("row name = %q, want tool-disambiguated pane name", got)
+	}
+}
+
 // TestComposeOnlyForInteractive verifies `c` is a no-op on a background agent
 // (there's no way to message a headless job from outside `claude agents`) and
 // enters compose mode for an interactive one.

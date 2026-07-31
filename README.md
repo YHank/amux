@@ -6,8 +6,8 @@
 together:
 
 1. **Interactive agents** — `claude`, `omp` ([Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)),
-   `codex`, `aider`, `gemini` running in the foreground of any tmux pane,
-   across every session.
+   `opencode`, `codex`, `aider`, and `gemini` running in the foreground of any
+   tmux pane, across every session.
 2. **Background agents** — headless daemons that have **no tmux pane at all**
    and are otherwise invisible: Claude Code jobs started with the `agents`
    command, and Oh My Pi's own named background tasks.
@@ -52,13 +52,13 @@ working right now, what's waiting on you, and what's done — grouped by project
   live process/socket, not a timestamp, so a long-running agent never looks
   dead and a crashed one never looks alive.
 - **Working vs. idle, not just "alive"** — an interactive pane isn't just
-  "live" or not: amux reads the spinner glyph Claude Code/Oh My Pi write into
-  the pane title while actively generating, so you can tell a busy agent from
-  one that's alive but sitting at a prompt waiting for you.
+  "live" or not: amux reads each supported tool's live pane indicators
+  (title spinner or bounded content/footer markers), so you can tell a busy
+  agent from one that's alive but sitting at a prompt waiting for you.
 - **Knows when an agent is waiting on *you*** — a distinct `◆ input` state for
-  an agent that has asked a question (e.g. Claude Code's AskUserQuestion) and
-  is blocked on your choice, detected from the pane's actual content, not
-  guessed from the title.
+  an agent that has asked a question (including Claude Code AskUserQuestion and
+  OpenCode question prompts) and is blocked on your choice, detected from the
+  pane's actual content rather than guessed from its title.
 - **Live preview, in color** — the detail panel shows the selected agent's
   real terminal output with its own colors intact, refreshed every cycle,
   mux-style — not just a flat one-line status.
@@ -85,9 +85,9 @@ working right now, what's waiting on you, and what's done — grouped by project
 ## Scope
 
 amux tracks **AI agents**: `claude` and `omp` (interactive and background),
-plus `codex`/`aider`/`gemini` when they run interactively in a pane. Ordinary
-shells, editors, and prompt-theme sessions (e.g. an idle `oh-my-posh` shell
-with no agent running in it) are intentionally **not** listed — they're
+plus `opencode`/`codex`/`aider`/`gemini` when they run interactively in a pane.
+Ordinary shells, editors, and prompt-theme sessions (e.g. an idle `oh-my-posh`
+shell with no agent running in it) are intentionally **not** listed — they're
 environment, not agents. Model/token detail on background agents is currently
 Claude-specific; omp background tasks show name and state only.
 
