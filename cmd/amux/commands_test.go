@@ -5,7 +5,57 @@ import (
 	"testing"
 
 	"github.com/kyhan/amux/internal/collect"
+	"github.com/kyhan/amux/internal/ui"
 )
+
+func TestClaudeActionArgs(t *testing.T) {
+	manage := &ui.Action{Kind: "manage", CWD: "/tmp/project with spaces"}
+	name, args, err := claudeActionArgs(manage)
+	if err != nil || name != "claude-agents" ||
+		strings.Join(args, "\x00") != "agents\x00--cwd\x00/tmp/project with spaces" {
+		t.Fatalf("manage args: name=%q args=%q err=%v", name, args, err)
+	}
+
+	if _, _, err := claudeActionArgs(&ui.Action{Kind: "resume"}); err == nil {
+		t.Error("unsupported Claude action should fail")
+	}
+}
+
+func TestClaudeWindowCommandQuotesEveryArgument(t *testing.T) {
+	path := "/tmp/claude path"
+	cwd := "project'; touch /tmp/pwn"
+	got := claudeWindowCommand(path, []string{"agents", "--cwd", cwd})
+	want := "exec " + shellQuote(path) + " " + shellQuote("agents") + " " + shellQuote("--cwd") + " " + shellQuote(cwd)
+	if got != want {
+		t.Errorf("window command = %q, want %q", got, want)
+	}
+}
+
+func TestInvokingTmuxSessionArgsPreferPopupClient(t *testing.T) {
+	got := strings.Join(invokingTmuxSessionArgs("client-1", "%42"), "\x00")
+	want := "display-message\x00-p\x00-c\x00client-1\x00#{client_session}"
+	if got != want {
+		t.Errorf("popup args = %q, want %q", got, want)
+	}
+	got = strings.Join(invokingTmuxSessionArgs("", "%42"), "\x00")
+	want = "display-message\x00-p\x00-t\x00%42\x00#{session_name}"
+	if got != want {
+		t.Errorf("pane args = %q, want %q", got, want)
+	}
+}
+
+func TestFocusTmuxArgsTargetsPopupClientDirectly(t *testing.T) {
+	got := strings.Join(focusTmuxArgs("client-1", "@42"), "\x00")
+	want := "switch-client\x00-c\x00client-1\x00-t\x00@42"
+	if got != want {
+		t.Errorf("popup focus args = %q, want %q", got, want)
+	}
+	got = strings.Join(focusTmuxArgs("", "@42"), "\x00")
+	want = "select-window\x00-t\x00@42"
+	if got != want {
+		t.Errorf("pane focus args = %q, want %q", got, want)
+	}
+}
 
 func TestStatusLineOrdersAttentionFirst(t *testing.T) {
 	snap := collect.Snapshot{Agents: []collect.Agent{

@@ -21,12 +21,11 @@ const refreshEvery = 2 * time.Second
 // not, so they refresh less frequently.
 const notesRefreshEvery = 10 * time.Second
 
-// Action is what amux should do after the TUI exits (e.g. attach to a session).
+// Action is what amux should do after the TUI exits.
 type Action struct {
-	Kind       string // "attach" | "resume"
+	Kind       string // "attach" | "manage"
 	TmuxTarget string // for attach
 	Session    string // for attach when not already inside tmux
-	SessionID  string // for resume
 	CWD        string
 }
 
@@ -42,6 +41,7 @@ type row struct {
 	kind    rowKind
 	project *collect.Project
 	agent   *collect.Agent
+	working int // visible working agents for a project header
 }
 
 // Model is the Bubble Tea model for the dashboard.
@@ -51,14 +51,14 @@ type Model struct {
 	sel     int   // index into selectable agent rows
 	selRows []int // indices into rows that are selectable (agents)
 
-	filter       string
-	filtering    bool
-	showDone     bool            // reveal completed, stopped, and acknowledged errors
-	hidden       int             // count of agents hidden by the current view
-	acknowledged map[string]bool // session-local error acknowledgements by agent ID
-
-	stacked         bool // render the agent list above the detail pane
-	hideDetail      bool // hide the detail pane so the list fills the viewport
+	filter          string
+	filtering       bool
+	showDone        bool            // reveal completed, stopped, and dismissed agents
+	hidden          int             // count of agents hidden by the current view
+	acknowledged    map[string]bool // session-local error acknowledgements by agent ID
+	dismissed       map[string]bool // session-local background dismissals by agent ID
+	stacked         bool            // render the agent list above the detail pane
+	hideDetail      bool            // hide the detail pane so the list fills the viewport
 	preferencesPath string
 	notesStore      *notes.Store
 	naming          bool // capturing a note for the selected agent
@@ -94,6 +94,7 @@ func New() Model {
 		stacked:          prefs.Stacked,
 		hideDetail:       prefs.HideDetail,
 		acknowledged:     map[string]bool{},
+		dismissed:        map[string]bool{},
 	}
 }
 
@@ -121,10 +122,10 @@ type sentMsg struct {
 	err    error
 }
 
-// killedMsg reports the outcome of killing a tmux pane.
 type killedMsg struct {
-	name string
-	err  error
+	target string
+	name   string
+	err    error
 }
 
 func refreshCmd() tea.Msg {
@@ -154,7 +155,7 @@ func sendToPane(target, text string) tea.Cmd {
 func killPane(target, name string) tea.Cmd {
 	return func() tea.Msg {
 		err := exec.Command("tmux", "kill-pane", "-t", target).Run()
-		return killedMsg{name: name, err: err}
+		return killedMsg{target: target, name: name, err: err}
 	}
 }
 
@@ -193,6 +194,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.snap = msg.snap
 		m.pruneNotes()
 		m.pruneAcknowledged()
+		m.pruneDismissed()
 		m.rebuildRows()
 		return m, nil
 
@@ -207,14 +209,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case killedMsg:
 		if msg.err != nil {
 			m.notice = "kill failed: " + msg.err.Error()
-		} else {
-			m.notice = "killed " + msg.name
+			return m, nil
 		}
-		// No forced refresh here: an immediate refreshCmd would race its own
-		// snapshotMsg handler, which clears m.notice — the killed/failed
-		// notice would flash for under a frame. The regular 2s tick already
-		// picks up the pane's disappearance; that small delay is the same
-		// trade-off sentMsg already makes.
+		m.removePane(msg.target)
+		m.notice = "killed " + msg.name
 		return m, nil
 
 	case tea.KeyMsg:
@@ -313,6 +311,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n := len(m.selRows); n > 0 {
 			m.sel = n - 1
 		}
+	case "J":
+		m.moveProject(1)
+	case "K":
+		m.moveProject(-1)
 	case "/":
 		m.filtering = true
 	case "i":
@@ -335,15 +337,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.composeInput = ""
 		}
 	case "x":
-		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
-			m.confirmingKill = true
-			m.killTarget = a.TmuxTarget
-			m.killName = a.Name
-		}
-	case "esc":
-		if m.filter != "" {
-			m.filter = ""
-			m.rebuildRows()
+		if a := m.selectedAgent(); a != nil {
+			if a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
+				m.confirmingKill = true
+				m.killTarget = a.TmuxTarget
+				m.killName = a.Name
+			} else if a.Kind == collect.KindBackground {
+				if m.dismissed == nil {
+					m.dismissed = map[string]bool{}
+				}
+				m.dismissed[a.ID] = true
+				m.notice = "dismissed " + a.Name
+				m.rebuildRows()
+			}
 		}
 	case "r":
 		return m, refreshCmd
@@ -358,9 +364,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.rebuildRows()
 	case "enter":
 		if a := m.selectedAgent(); a != nil {
-			m.action = actionFor(a)
-			m.quit = true
-			return m, tea.Quit
+			if action := actionFor(a); action != nil {
+				m.action = action
+				m.quit = true
+				return m, tea.Quit
+			}
+			m.notice = "no attach or resume action for " + a.Tool
 		}
 	}
 	return m, nil
@@ -392,6 +401,53 @@ func (m *Model) pruneAcknowledged() {
 	}
 }
 
+// removePane updates the displayed snapshot immediately after tmux confirms a
+// pane was killed. Waiting for the next polling tick leaves a stale row on
+// screen even though the action has already succeeded.
+func (m *Model) removePane(target string) {
+	agents := make([]collect.Agent, 0, len(m.snap.Agents))
+	for _, a := range m.snap.Agents {
+		if a.Kind == collect.KindInteractive && a.TmuxTarget == target {
+			continue
+		}
+		agents = append(agents, a)
+	}
+	m.snap.Agents = agents
+
+	projects := make([]collect.Project, 0, len(m.snap.Projects))
+	for _, p := range m.snap.Projects {
+		projectAgents := make([]collect.Agent, 0, len(p.Agents))
+		for _, a := range p.Agents {
+			if a.Kind == collect.KindInteractive && a.TmuxTarget == target {
+				continue
+			}
+			projectAgents = append(projectAgents, a)
+		}
+		if len(projectAgents) == 0 {
+			continue
+		}
+		p.Agents = projectAgents
+		projects = append(projects, p)
+	}
+	m.snap.Projects = projects
+	m.rebuildRows()
+}
+
+func (m *Model) pruneDismissed() {
+	for id := range m.dismissed {
+		keep := false
+		for _, a := range m.snap.Agents {
+			if a.ID == id {
+				keep = true
+				break
+			}
+		}
+		if !keep {
+			delete(m.dismissed, id)
+		}
+	}
+}
+
 func (m *Model) moveSel(d int) {
 	n := len(m.selRows)
 	if n == 0 {
@@ -406,6 +462,33 @@ func (m *Model) moveSel(d int) {
 	}
 }
 
+// moveProject selects the first visible agent in the adjacent project. Like
+// j/k, movement stops at the list boundary rather than wrapping unexpectedly.
+func (m *Model) moveProject(d int) {
+	if d == 0 || m.sel < 0 || m.sel >= len(m.selRows) {
+		return
+	}
+	current := m.rows[m.selRows[m.sel]].project
+	if current == nil {
+		return
+	}
+	for i := m.sel + d; i >= 0 && i < len(m.selRows); i += d {
+		candidate := m.rows[m.selRows[i]].project
+		if candidate == nil || candidate.Key == current.Key {
+			continue
+		}
+		for i > 0 {
+			previous := m.rows[m.selRows[i-1]].project
+			if previous == nil || previous.Key != candidate.Key {
+				break
+			}
+			i--
+		}
+		m.sel = i
+		return
+	}
+}
+
 func (m Model) selectedAgent() *collect.Agent {
 	if m.sel < 0 || m.sel >= len(m.selRows) {
 		return nil
@@ -417,7 +500,10 @@ func actionFor(a *collect.Agent) *Action {
 	if a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
 		return &Action{Kind: "attach", TmuxTarget: a.TmuxTarget, Session: a.Session, CWD: a.CWD}
 	}
-	return &Action{Kind: "resume", SessionID: a.ID, CWD: a.CWD}
+	if a.Kind == collect.KindBackground && a.Tool == "claude" && a.Live {
+		return &Action{Kind: "manage", CWD: a.CWD}
+	}
+	return nil
 }
 
 func hiddenByDefault(l collect.Lifecycle) bool {
@@ -492,8 +578,12 @@ func (m *Model) rebuildRows() {
 			if f != "" && !agentMatches(a, p, m.notesStore.Get(a.ID), f) {
 				continue
 			}
-			// Completed/stopped agents and acknowledged errors fold away.
-			// New errors remain visible until the user acknowledges them.
+			// Dismissed background agents never reappear in the current
+			// dashboard session. Completed/stopped agents and acknowledged
+			// errors otherwise fold away until history is shown.
+			if m.dismissed[a.ID] {
+				continue
+			}
 			acknowledgedError := a.Life == collect.LifeError && m.acknowledged[a.ID]
 			if (hiddenByDefault(a.Life) || acknowledgedError) && !m.showDone {
 				m.hidden++
@@ -526,18 +616,29 @@ func (m *Model) rebuildRows() {
 		return visible[i].project.Key < visible[j].project.Key
 	})
 	for _, vp := range visible {
-		m.rows = append(m.rows, row{kind: rowHeader, project: vp.project})
+		working := 0
+		for _, a := range vp.agents {
+			if a.Life == collect.LifeWorking {
+				working++
+			}
+		}
+		m.rows = append(m.rows, row{kind: rowHeader, project: vp.project, working: working})
 		for _, a := range vp.agents {
 			m.selRows = append(m.selRows, len(m.rows))
 			m.rows = append(m.rows, row{kind: rowAgent, project: vp.project, agent: a})
 		}
 	}
 	if prevID != "" {
+		found := false
 		for i, ri := range m.selRows {
 			if a := m.rows[ri].agent; a != nil && a.ID == prevID {
 				m.sel = i
+				found = true
 				break
 			}
+		}
+		if !found {
+			m.sel = 0
 		}
 	}
 	if m.sel >= len(m.selRows) {

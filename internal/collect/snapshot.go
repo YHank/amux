@@ -33,14 +33,28 @@ func Collect(now time.Time) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 
-	all := append(inter, bg...)
-	all = append(all, ompBg...)
+	all := append([]Agent{}, inter...)
+	all = appendLiveBackgrounds(all, bg)
+	all = appendLiveBackgrounds(all, ompBg)
 	snap := Snapshot{
 		Agents:   all,
 		Projects: group(all),
 		Taken:    now,
 	}
 	return snap, nil
+}
+
+// appendLiveBackgrounds excludes persisted task records whose owning daemon
+// is gone. A background record is not an active agent merely because a tool
+// left its state file on disk.
+func appendLiveBackgrounds(dst, agents []Agent) []Agent {
+	for _, a := range agents {
+		if a.Kind == KindBackground && !a.Live {
+			continue
+		}
+		dst = append(dst, a)
+	}
+	return dst
 }
 
 // AttentionRank orders lifecycles by how urgently a person needs to act.

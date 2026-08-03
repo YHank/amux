@@ -8,12 +8,10 @@ together:
 1. **Interactive agents** — `claude`, `omp` ([Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)),
    `opencode`, `codex`, `aider`, and `gemini` running in the foreground of any
    tmux pane, across every session.
-2. **Background agents** — headless daemons that have **no tmux pane at all**
-   and are otherwise invisible: Claude Code jobs started with the `agents`
-   command, and Oh My Pi's own named background tasks.
-
-Both are grouped by the **project** they belong to, so a background agent shows
-up right next to the interactive session that spawned it.
+2. **Background agents** — live headless daemons that have **no tmux pane at
+   all** and are otherwise invisible: Claude Code jobs started with the
+   `agents` command, and Oh My Pi's own named background tasks. Persisted
+   records whose owning daemon has exited are not listed.
 
 It's the agent-centric companion to [`lunemis/tap/mux`](https://github.com/lunemis/mux):
 where mux is a tmux *session switcher* with AI badges, amux is an *agent
@@ -49,8 +47,8 @@ working right now, what's waiting on you, and what's done — grouped by project
   (`~/.claude/jobs`, `~/.omp/run/daemons`).
 - **Project grouping** — agents bucket under their git repo root.
 - **Accurate liveness** — background agents are checked against their daemon's
-  live process/socket, not a timestamp, so a long-running agent never looks
-  dead and a crashed one never looks alive.
+  live process/socket. Persisted records without a live owner are excluded, so
+  an exited job never looks like a running or input-waiting agent.
 - **Working vs. idle, not just "alive"** — an interactive pane isn't just
   "live" or not: amux reads each supported tool's live pane indicators
   (title spinner or bounded content/footer markers), so you can tell a busy
@@ -62,14 +60,13 @@ working right now, what's waiting on you, and what's done — grouped by project
 - **Live preview, in color** — the detail panel shows the selected agent's
   real terminal output with its own colors intact, refreshed every cycle,
   mux-style — not just a flat one-line status.
-- **Reply without switching panes** — press `c` on an interactive agent to
-  type a message and send it straight into that pane (types it, then presses
-  Enter for you), so you can answer a pending question from the dashboard.
-  Interactive only — there's no way to message a headless background job from
-  outside `claude agents` itself.
-- **Kill, with confirmation** — press `x` on an interactive agent to end its
-  pane outright (mux-style); only `y` confirms, any other key backs out.
-  Interactive only, for the same reason `c` is.
+- **Act at the point of attention** — press `c` to reply directly to an
+  interactive pane. For a live headless Claude job, `Enter` opens Claude's
+  native agent manager. amux never writes to Claude's private daemon state or
+  socket.
+- **Kill or dismiss** — press `x` on an interactive agent, then `y`, to end
+  its tmux pane. Press `x` on a live headless agent to remove it from the
+  current amux dashboard session without touching its daemon.
 - **Attention-first ordering** — projects and agents sort by required human
   action: input, error, stale/unknown, working, idle, then stopped/done.
   New errors remain visible until acknowledged with `a`; acknowledged errors
@@ -79,8 +76,9 @@ working right now, what's waiting on you, and what's done — grouped by project
   the list and detail panel, never written back to tmux/Claude/omp.
 - **Live detail** — model, tokens, CPU, age, and the original task for the
   selected agent.
-- **Attach in a keystroke** — `Enter` switches to an interactive agent's pane;
-  for a background agent it prints the `claude --resume` command.
+- **Attach or manage in a keystroke** — `Enter` switches to an interactive
+  pane or creates and focuses a dedicated tmux window for a live headless
+  Claude agent manager. Outside tmux, the same action runs in the current terminal.
 - **Statusbar widget** — `amux status` prints the same attention-first summary,
   for example `◆1 ✖1 ▶2`.
 - **Popup mode** — summon amux as a floating overlay over any session.
@@ -127,10 +125,11 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | Key | Action |
 |---|---|
 | `j` / `k` | Move down / up |
+| `J` / `K` | Move to the first visible agent in the next / previous project |
 | `g` / `G` | Jump to first / last |
-| `Enter` | Attach to the selected agent's pane (or print resume cmd) |
+| `Enter` | Attach interactive panes or open Claude agents for a live headless session |
 | `c` | Compose a message and send it into an interactive agent's pane |
-| `x` | Kill the selected agent's pane (y to confirm) |
+| `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
 | `/` | Filter by tool, name, project, model, path, status detail, or saved note |
 | `i` | Add / edit a note on the selected agent |
 | `a` | Acknowledge and fold the selected error for this dashboard session |

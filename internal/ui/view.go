@@ -105,7 +105,12 @@ func (m Model) attentionCounts() (map[collect.Lifecycle]int, int) {
 	counts := m.snap.Counts()
 	history := counts[collect.LifeDone] + counts[collect.LifeStopped]
 	for _, a := range m.snap.Agents {
-		if a.Life == collect.LifeError && m.acknowledged[a.ID] {
+		if m.dismissed[a.ID] {
+			counts[a.Life]--
+			if hiddenByDefault(a.Life) {
+				history--
+			}
+		} else if a.Life == collect.LifeError && m.acknowledged[a.ID] {
 			counts[collect.LifeError]--
 			history++
 		}
@@ -164,8 +169,19 @@ func (m Model) renderFooter() string {
 	} else if m.showDone {
 		historyKey = "d hide history"
 	}
-	keys := []string{"j/k move", "enter attach", "c send", "x kill", "/ filter", "i note"}
-	if a := m.selectedAgent(); a != nil && a.Life == collect.LifeError {
+	keys := []string{"j/k move", "J/K project"}
+	a := m.selectedAgent()
+	switch {
+	case a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "":
+		keys = append(keys, "enter attach", "c send", "x kill")
+	case a != nil && a.Kind == collect.KindBackground:
+		if a.Tool == "claude" && a.Live {
+			keys = append(keys, "enter agents")
+		}
+		keys = append(keys, "x dismiss")
+	}
+	keys = append(keys, "/ filter", "i note")
+	if a != nil && a.Life == collect.LifeError {
 		keys = append(keys, "a acknowledge")
 	}
 	keys = append(keys, historyKey, "v layout", "m preview", "q quit")
@@ -228,7 +244,7 @@ func (m Model) renderList(w, h int) string {
 	for i := start; i < end; i++ {
 		r := m.rows[i]
 		if r.kind == rowHeader {
-			b.WriteString(m.renderProjectHeader(r.project, w))
+			b.WriteString(m.renderProjectHeader(r.project, r.working, w))
 		} else {
 			selected := m.sel < len(m.selRows) && m.selRows[m.sel] == i
 			b.WriteString(m.renderAgentRow(r.agent, w, selected, now))
@@ -238,11 +254,11 @@ func (m Model) renderList(w, h int) string {
 	return b.String()
 }
 
-func (m Model) renderProjectHeader(p *collect.Project, w int) string {
+func (m Model) renderProjectHeader(p *collect.Project, working, w int) string {
 	name := styleProj.Render(p.Name)
 	wk := ""
-	if n := p.Working(); n > 0 {
-		wk = lipgloss.NewStyle().Foreground(cGreen).Render(fmt.Sprintf(" ▶%d", n))
+	if working > 0 {
+		wk = lipgloss.NewStyle().Foreground(cGreen).Render(fmt.Sprintf(" ▶%d", working))
 	}
 	return truncateWidth(name+wk, w)
 }
@@ -374,6 +390,11 @@ func (m Model) renderDetail(w, h int) string {
 	if a.NeedsInput && a.Suggested != "" {
 		b.WriteString("\n" + lipgloss.NewStyle().Foreground(cYellow).Bold(true).Render("↩ suggested reply") + "\n")
 		b.WriteString(wrap(a.Suggested, w) + "\n")
+	}
+
+	if action := actionFor(a); action != nil && action.Kind == "manage" {
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(cAccent).Bold(true).
+			Render("Enter: open Claude agents to respond") + "\n")
 	}
 
 	if a.Detail != "" {

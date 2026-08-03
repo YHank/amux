@@ -31,6 +31,18 @@ func TestDetectTool(t *testing.T) {
 	}
 }
 
+func TestAppendLiveBackgroundsExcludesPersistedRecords(t *testing.T) {
+	interactive := Agent{ID: "pane", Kind: KindInteractive, Tool: "claude"}
+	live := Agent{ID: "live", Kind: KindBackground, Tool: "claude", Live: true}
+	deadClaude := Agent{ID: "dead-claude", Kind: KindBackground, Tool: "claude"}
+	deadOMP := Agent{ID: "dead-omp", Kind: KindBackground, Tool: "omp"}
+
+	got := appendLiveBackgrounds([]Agent{interactive}, []Agent{live, deadClaude, deadOMP})
+	if len(got) != 2 || got[0].ID != "pane" || got[1].ID != "live" {
+		t.Fatalf("live background filter = %#v, want only interactive and live background", got)
+	}
+}
+
 func TestTrimNFields(t *testing.T) {
 	cases := []struct {
 		line string
@@ -332,6 +344,23 @@ func TestIsSpinnerGlyph(t *testing.T) {
 		if isSpinnerGlyph(r) {
 			t.Errorf("%q (U+%04X) should not be a spinner glyph", r, r)
 		}
+	}
+}
+
+func TestJobToAgentCarriesLiveness(t *testing.T) {
+	js := jobState{SessionID: "session-123", DaemonShort: "daemon-1"}
+	a := jobToAgent(js, "fallback-dir", map[string]bool{"daemon-1": true})
+	if a.ID != "session-123" || !a.Live {
+		t.Fatalf("live job fields lost: %#v", a)
+	}
+
+	js.SessionID = ""
+	a = jobToAgent(js, "fallback-dir", map[string]bool{"daemon-1": false})
+	if a.ID != "fallback-dir" {
+		t.Errorf("fallback identity = %q, want directory ID", a.ID)
+	}
+	if a.Live {
+		t.Error("dead daemon reported live")
 	}
 }
 

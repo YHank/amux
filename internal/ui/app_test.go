@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,64 @@ import (
 
 func mkAgent(id string, life collect.Lifecycle) collect.Agent {
 	return collect.Agent{ID: id, Kind: collect.KindBackground, Life: life, Project: "/p", Name: id}
+}
+func TestProjectNavigationMovesBetweenVisibleProjects(t *testing.T) {
+	a1 := collect.Agent{ID: "a1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/a", Name: "a1"}
+	a2 := collect.Agent{ID: "a2", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/a", Name: "a2"}
+	b1 := collect.Agent{ID: "b1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/b", Name: "b1"}
+	c1 := collect.Agent{ID: "c1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/c", Name: "c1"}
+	m := Model{snap: collect.Snapshot{
+		Projects: []collect.Project{
+			{Key: "/a", Name: "a", Agents: []collect.Agent{a1, a2}},
+			{Key: "/b", Name: "b", Agents: []collect.Agent{b1}},
+			{Key: "/c", Name: "c", Agents: []collect.Agent{c1}},
+		},
+		Agents: []collect.Agent{a1, a2, b1, c1},
+	}}
+	m.rebuildRows()
+
+	for _, step := range []struct {
+		key  rune
+		want string
+	}{
+		{'J', "b1"},
+		{'J', "c1"},
+		{'J', "c1"}, // next-project boundary
+		{'K', "b1"},
+		{'K', "a1"},
+		{'K', "a1"}, // previous-project boundary
+	} {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{step.key}})
+		m = next.(Model)
+		if got := m.selectedAgent(); got == nil || got.ID != step.want {
+			t.Fatalf("%c selected %#v, want %q", step.key, got, step.want)
+		}
+	}
+
+	m.filter = "b"
+	m.rebuildRows()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	if got := next.(Model).selectedAgent(); got == nil || got.ID != "b1" {
+		t.Fatalf("J crossed filtered project boundary: %#v", got)
+	}
+}
+
+func TestDismissalUsesVisibleProjectWorkingCount(t *testing.T) {
+	dismissed := collect.Agent{
+		ID: "dismissed", Kind: collect.KindBackground, Life: collect.LifeWorking,
+		Project: "/p", Name: "dismissed",
+	}
+	kept := collect.Agent{
+		ID: "kept", Kind: collect.KindBackground, Life: collect.LifeWorking,
+		Project: "/p", Name: "kept",
+	}
+	m := Model{snap: projSnap(dismissed, kept), width: 80, height: 12}
+	m.rebuildRows()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = next.(Model)
+	if list := m.renderList(80, 12); !strings.Contains(list, "▶1") || strings.Contains(list, "▶2") {
+		t.Errorf("project header did not use visible working count: %q", list)
+	}
 }
 
 // TestSelectionAnchorsAcrossRefresh verifies the cursor stays on the same agent
@@ -67,6 +126,25 @@ func TestSelectionClampsWhenSelectedAgentVanishes(t *testing.T) {
 
 	if got := m.selectedAgent(); got == nil || got.ID != "a" {
 		t.Errorf("after selected agent vanished, selected %v, want a (clamped)", got)
+	}
+}
+
+func TestSelectionResetsWhenMiddleAgentVanishes(t *testing.T) {
+	m := Model{snap: projSnap(
+		mkAgent("a", collect.LifeWorking),
+		mkAgent("b", collect.LifeWorking),
+		mkAgent("c", collect.LifeWorking),
+	)}
+	m.rebuildRows()
+	m.sel = 1 // "b"
+	m.snap = projSnap(
+		mkAgent("a", collect.LifeWorking),
+		mkAgent("b", collect.LifeDone),
+		mkAgent("c", collect.LifeWorking),
+	)
+	m.rebuildRows()
+	if got := m.selectedAgent(); got == nil || got.ID != "a" {
+		t.Errorf("after middle agent vanished, selected %v, want a", got)
 	}
 }
 
@@ -236,7 +314,10 @@ func TestHeaderListsAttentionStatesFirst(t *testing.T) {
 }
 
 func projSnap(agents ...collect.Agent) collect.Snapshot {
-	return collect.Snapshot{Projects: []collect.Project{{Key: "/p", Name: "p", Agents: agents}}}
+	return collect.Snapshot{
+		Projects: []collect.Project{{Key: "/p", Name: "p", Agents: append([]collect.Agent(nil), agents...)}},
+		Agents:   append([]collect.Agent(nil), agents...),
+	}
 }
 
 func TestSlashFilterMatchesSavedNotes(t *testing.T) {
@@ -300,9 +381,65 @@ func TestSlashFilterMatchesToolWhenPaneNameDiffers(t *testing.T) {
 	}
 }
 
+// Only a live Claude daemon exposes the native manager action.
+func TestBackgroundClaudeActionsRequireLiveClaude(t *testing.T) {
+	live := collect.Agent{
+		Kind: collect.KindBackground, Tool: "claude", Live: true, CWD: "/project",
+	}
+	if got := actionFor(&live); got == nil || got.Kind != "manage" {
+		t.Fatalf("live Claude action = %#v, want native agent manager", got)
+	}
+
+	inactive := live
+	inactive.Live = false
+	if got := actionFor(&inactive); got != nil {
+		t.Errorf("inactive Claude produced action %#v", got)
+	}
+
+	unsupported := live
+	unsupported.Tool = "omp"
+	if got := actionFor(&unsupported); got != nil {
+		t.Errorf("unsupported background tool produced action %#v", got)
+	}
+}
+
+func TestUnsupportedBackgroundEnterDoesNotQuit(t *testing.T) {
+	agent := collect.Agent{
+		ID: "omp-bg", Kind: collect.KindBackground, Tool: "omp",
+		Life: collect.LifeInput, Project: "/p", Name: "omp-bg",
+	}
+	m := Model{snap: projSnap(agent)}
+	m.rebuildRows()
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if m.quit || m.action != nil || cmd != nil {
+		t.Fatalf("unsupported background Enter quit or acted: quit=%v action=%#v cmd=%v", m.quit, m.action, cmd)
+	}
+	if !strings.Contains(m.notice, "no attach or resume action") {
+		t.Errorf("missing unavailable-action notice: %q", m.notice)
+	}
+}
+
+func TestFooterShowsSelectedAgentCapability(t *testing.T) {
+	live := collect.Agent{
+		ID: "live", Kind: collect.KindBackground, Tool: "claude", Live: true,
+		Life: collect.LifeInput, Project: "/p", Name: "live",
+	}
+	m := Model{snap: projSnap(live), width: 200}
+	m.rebuildRows()
+	footer := m.renderFooter()
+	if !strings.Contains(footer, "enter agents") || strings.Contains(footer, "c send") {
+		t.Errorf("live background footer = %q", footer)
+	}
+	if detail := m.renderDetail(100, 30); !strings.Contains(detail, "open Claude agents") {
+		t.Errorf("live background detail = %q", detail)
+	}
+
+}
+
 // TestComposeOnlyForInteractive verifies `c` is a no-op on a background agent
-// (there's no way to message a headless job from outside `claude agents`) and
-// enters compose mode for an interactive one.
+// and enters compose mode for an interactive one.
 func TestComposeOnlyForInteractive(t *testing.T) {
 	bg := collect.Agent{ID: "b1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/p", Name: "b1"}
 	m := Model{snap: projSnap(bg)}
@@ -428,6 +565,61 @@ func TestKillOnlyForInteractive(t *testing.T) {
 	}
 }
 
+func TestHeadlessXDismissesLocallyEvenInHistoryMode(t *testing.T) {
+	bg := collect.Agent{
+		ID: "headless", Kind: collect.KindBackground, Tool: "omp",
+		Life: collect.LifeWorking, Project: "/p", Name: "headless",
+	}
+	m := Model{snap: projSnap(bg), width: 200}
+	m.rebuildRows()
+	if footer := m.renderFooter(); !strings.Contains(footer, "x dismiss") {
+		t.Fatalf("background footer missing dismiss shortcut: %q", footer)
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = next.(Model)
+	if cmd != nil || !m.dismissed["headless"] {
+		t.Fatalf("headless x did not dismiss locally: cmd=%v dismissed=%v", cmd, m.dismissed)
+	}
+	if len(m.selRows) != 0 || !strings.Contains(m.notice, "dismissed headless") {
+		t.Fatalf("dismissed background remains visible: rows=%d notice=%q", len(m.selRows), m.notice)
+	}
+	if header := m.renderHeader(); strings.Contains(header, "1 working") || strings.Contains(header, "history") {
+		t.Errorf("dismissed background remains in dashboard summary: %q", header)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = next.(Model)
+	if len(m.selRows) != 0 {
+		t.Fatalf("history mode restored dismissed agent: %#v", m.selectedAgent())
+	}
+
+	stopped := bg
+	stopped.ID = "stopped"
+	stopped.Life = collect.LifeStopped
+	m = Model{snap: projSnap(stopped), showDone: true}
+	m.rebuildRows()
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if got := next.(Model); len(got.selRows) != 0 {
+		t.Fatalf("dismissed stopped agent remained visible in history: %#v", got.selectedAgent())
+	}
+}
+
+func TestDismissedStoppedAgentDoesNotDoubleCountHistory(t *testing.T) {
+	stopped := collect.Agent{
+		ID: "stopped", Kind: collect.KindBackground, Life: collect.LifeStopped,
+		Project: "/p", Name: "stopped",
+	}
+	m := Model{
+		snap:      projSnap(stopped),
+		dismissed: map[string]bool{"stopped": true},
+	}
+	counts, history := m.attentionCounts()
+	if counts[collect.LifeStopped] != 0 || history != 0 {
+		t.Fatalf("dismissed stopped counts = %#v, history=%d; want stopped=0 history=0", counts, history)
+	}
+}
+
 // TestKillConfirmRequiresY verifies only y/Y actually kills; every other key,
 // including the agent's own selection keys, cancels without killing.
 func TestKillConfirmRequiresY(t *testing.T) {
@@ -462,6 +654,52 @@ func TestKillConfirmRequiresY(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("y should trigger the kill command")
+	}
+}
+
+func TestSuccessfulKillRemovesPaneImmediately(t *testing.T) {
+	killed := collect.Agent{
+		ID: "killed", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "killed", TmuxTarget: "sess:0.0",
+	}
+	kept := collect.Agent{
+		ID: "kept", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "kept", TmuxTarget: "sess:0.1",
+	}
+	m := Model{snap: projSnap(killed, kept)}
+	m.rebuildRows()
+
+	next, cmd := m.Update(killedMsg{target: "sess:0.0", name: "killed"})
+	m = next.(Model)
+	if cmd != nil {
+		t.Error("successful kill should update the existing snapshot, not wait for a refresh command")
+	}
+	if len(m.snap.Agents) != 1 || m.snap.Agents[0].ID != "kept" {
+		t.Fatalf("killed pane remained in snapshot: %#v", m.snap.Agents)
+	}
+	if got := m.selectedAgent(); got == nil || got.ID != "kept" {
+		t.Fatalf("selected agent after kill = %#v, want kept pane", got)
+	}
+	if !strings.Contains(m.notice, "killed killed") {
+		t.Errorf("kill notice = %q", m.notice)
+	}
+}
+
+func TestFailedKillKeepsPaneVisible(t *testing.T) {
+	agent := collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", Name: "pane", TmuxTarget: "sess:0.0",
+	}
+	m := Model{snap: projSnap(agent)}
+	m.rebuildRows()
+
+	next, _ := m.Update(killedMsg{target: "sess:0.0", name: "pane", err: errors.New("tmux unavailable")})
+	m = next.(Model)
+	if len(m.snap.Agents) != 1 {
+		t.Fatal("failed kill removed a still-live pane")
+	}
+	if !strings.Contains(m.notice, "kill failed") {
+		t.Errorf("failure notice = %q", m.notice)
 	}
 }
 

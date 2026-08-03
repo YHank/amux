@@ -76,7 +76,8 @@ func ompBackgroundAgents() ([]Agent, error) {
 
 func ompTaskToAgent(m ompDaemonMeta, hashDir string) Agent {
 	d := m.Daemon
-	project, live := ompHashDirContext(hashDir)
+	project, ownerLive := ompHashDirContext(hashDir)
+	live := ompTaskLive(d.State, ownerLive)
 
 	updated := msToTime(d.ExitedAt)
 	if updated.IsZero() {
@@ -95,6 +96,7 @@ func ompTaskToAgent(m ompDaemonMeta, hashDir string) Agent {
 		ID:        "omp-task:" + d.ID,
 		Kind:      KindBackground,
 		Tool:      "omp",
+		Live:      live,
 		Name:      d.Name,
 		Life:      ompNormalizeLife(d.State, live),
 		State:     d.State,
@@ -129,6 +131,21 @@ func ompHashDirContext(hashDir string) (project string, live bool) {
 		}
 	}
 	return project, live
+}
+
+// ompTaskLive distinguishes the task's terminal state from the liveness of
+// the shared OMP client that owns its registry. A live client can retain
+// exited task metadata, which must not keep that task in the dashboard.
+func ompTaskLive(state string, ownerLive bool) bool {
+	if !ownerLive {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "running", "starting":
+		return true
+	default:
+		return false
+	}
 }
 
 // ompNormalizeLife maps omp's daemon state enum onto a Lifecycle. A

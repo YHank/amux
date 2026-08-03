@@ -85,6 +85,7 @@ func jobToAgent(js jobState, dirName string, live map[string]bool) Agent {
 		ID:         id,
 		Kind:       KindBackground,
 		Tool:       "claude",
+		Live:       live[js.DaemonShort],
 		Name:       jobName(js, dirName),
 		Model:      modelFromFlags(js.RespawnFlags),
 		Life:       life,

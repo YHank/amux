@@ -83,8 +83,9 @@ type Agent struct {
 	Preview    []string // last few lines of the pane's actual terminal output
 
 	// Background-only extras (Claude Code jobs).
+	Live      bool   // owning background daemon has a live socket/process
 	Suggested string // suggested reply, if any
-	Short     string // daemonShort id (for `claude` resume hints)
+	Short     string // daemonShort id (for liveness correlation)
 }
 
 // Age returns how long ago the agent last changed state.
