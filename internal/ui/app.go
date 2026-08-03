@@ -3,6 +3,7 @@ package ui
 
 import (
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,10 +51,11 @@ type Model struct {
 	sel     int   // index into selectable agent rows
 	selRows []int // indices into rows that are selectable (agents)
 
-	filter    string
-	filtering bool
-	showDone  bool // reveal finished (done/stopped/error) agents
-	hidden    int  // count of finished agents hidden by the current view
+	filter       string
+	filtering    bool
+	showDone     bool            // reveal completed, stopped, and acknowledged errors
+	hidden       int             // count of agents hidden by the current view
+	acknowledged map[string]bool // session-local error acknowledgements by agent ID
 
 	stacked         bool // render the agent list above the detail pane
 	hideDetail      bool // hide the detail pane so the list fills the viewport
@@ -91,6 +93,7 @@ func New() Model {
 		preferencesPath:  path,
 		stacked:          prefs.Stacked,
 		hideDetail:       prefs.HideDetail,
+		acknowledged:     map[string]bool{},
 	}
 }
 
@@ -189,6 +192,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.snap = msg.snap
 		m.pruneNotes()
+		m.pruneAcknowledged()
 		m.rebuildRows()
 		return m, nil
 
@@ -316,6 +320,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.naming = true
 			m.noteInput = m.notesStore.Get(a.ID)
 		}
+	case "a":
+		if a := m.selectedAgent(); a != nil && a.Life == collect.LifeError {
+			if m.acknowledged == nil {
+				m.acknowledged = map[string]bool{}
+			}
+			m.acknowledged[a.ID] = true
+			m.notice = "acknowledged " + a.Name
+			m.rebuildRows()
+		}
 	case "c":
 		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
 			m.composing = true
@@ -364,6 +377,21 @@ func (m *Model) pruneNotes() {
 	m.notesStore.Prune(live)
 }
 
+func (m *Model) pruneAcknowledged() {
+	for id := range m.acknowledged {
+		keep := false
+		for _, a := range m.snap.Agents {
+			if a.ID == id && a.Life == collect.LifeError {
+				keep = true
+				break
+			}
+		}
+		if !keep {
+			delete(m.acknowledged, id)
+		}
+	}
+}
+
 func (m *Model) moveSel(d int) {
 	n := len(m.selRows)
 	if n == 0 {
@@ -392,6 +420,53 @@ func actionFor(a *collect.Agent) *Action {
 	return &Action{Kind: "resume", SessionID: a.ID, CWD: a.CWD}
 }
 
+func hiddenByDefault(l collect.Lifecycle) bool {
+	return l == collect.LifeDone || l == collect.LifeStopped
+}
+
+type visibleProject struct {
+	project *collect.Project
+	agents  []*collect.Agent
+}
+
+func visibleAgentRank(a *collect.Agent, acknowledged map[string]bool) int {
+	if a.Life == collect.LifeError && acknowledged[a.ID] {
+		return collect.AttentionRank(collect.LifeStopped)
+	}
+	return collect.AttentionRank(a.Life)
+}
+
+func visibleProjectAttention(agents []*collect.Agent, acknowledged map[string]bool) (rank, count int) {
+	rank = collect.AttentionRank(collect.Lifecycle("")) + 1
+	for _, a := range agents {
+		if a.Life == collect.LifeError && acknowledged[a.ID] {
+			continue
+		}
+		r := visibleAgentRank(a, acknowledged)
+		switch {
+		case r < rank:
+			rank, count = r, 1
+		case r == rank:
+			count++
+		}
+	}
+	return rank, count
+}
+
+func visibleProjectLatest(agents []*collect.Agent, acknowledged map[string]bool, rank int) time.Time {
+	var latest time.Time
+	for _, a := range agents {
+		if visibleAgentRank(a, acknowledged) != rank ||
+			(a.Life == collect.LifeError && acknowledged[a.ID]) {
+			continue
+		}
+		if a.UpdatedAt.After(latest) {
+			latest = a.UpdatedAt
+		}
+	}
+	return latest
+}
+
 // rebuildRows flattens the snapshot into display rows, honoring the filter, and
 // clamps the selection.
 func (m *Model) rebuildRows() {
@@ -408,29 +483,53 @@ func (m *Model) rebuildRows() {
 	m.selRows = m.selRows[:0]
 	m.hidden = 0
 	f := strings.ToLower(strings.TrimSpace(m.filter))
+	visible := make([]visibleProject, 0, len(m.snap.Projects))
 	for i := range m.snap.Projects {
 		p := &m.snap.Projects[i]
-		var matched []*collect.Agent
+		matched := make([]*collect.Agent, 0, len(p.Agents))
 		for j := range p.Agents {
 			a := &p.Agents[j]
 			if f != "" && !agentMatches(a, p, m.notesStore.Get(a.ID), f) {
 				continue
 			}
-			// Finished agents are hidden unless explicitly revealed; keep a
-			// running count so the view never silently drops them.
-			if a.Life.Terminal() && !m.showDone {
+			// Completed/stopped agents and acknowledged errors fold away.
+			// New errors remain visible until the user acknowledges them.
+			acknowledgedError := a.Life == collect.LifeError && m.acknowledged[a.ID]
+			if (hiddenByDefault(a.Life) || acknowledgedError) && !m.showDone {
 				m.hidden++
 				continue
 			}
 			matched = append(matched, a)
 		}
-		if len(matched) == 0 {
-			continue
+		sort.SliceStable(matched, func(i, j int) bool {
+			return visibleAgentRank(matched[i], m.acknowledged) <
+				visibleAgentRank(matched[j], m.acknowledged)
+		})
+		if len(matched) > 0 {
+			visible = append(visible, visibleProject{project: p, agents: matched})
 		}
-		m.rows = append(m.rows, row{kind: rowHeader, project: p})
-		for _, a := range matched {
+	}
+	sort.SliceStable(visible, func(i, j int) bool {
+		ri, ci := visibleProjectAttention(visible[i].agents, m.acknowledged)
+		rj, cj := visibleProjectAttention(visible[j].agents, m.acknowledged)
+		if ri != rj {
+			return ri < rj
+		}
+		if ci != cj {
+			return ci > cj
+		}
+		li := visibleProjectLatest(visible[i].agents, m.acknowledged, ri)
+		lj := visibleProjectLatest(visible[j].agents, m.acknowledged, rj)
+		if !li.Equal(lj) {
+			return li.After(lj)
+		}
+		return visible[i].project.Key < visible[j].project.Key
+	})
+	for _, vp := range visible {
+		m.rows = append(m.rows, row{kind: rowHeader, project: vp.project})
+		for _, a := range vp.agents {
 			m.selRows = append(m.selRows, len(m.rows))
-			m.rows = append(m.rows, row{kind: rowAgent, project: p, agent: a})
+			m.rows = append(m.rows, row{kind: rowAgent, project: vp.project, agent: a})
 		}
 	}
 	if prevID != "" {

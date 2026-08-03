@@ -393,6 +393,80 @@ func TestGroupOrdersProjectsAndAgents(t *testing.T) {
 	}
 }
 
+func TestAttentionRankPriority(t *testing.T) {
+	order := []Lifecycle{
+		LifeInput,
+		LifeError,
+		LifeStale,
+		LifeUnknown,
+		LifeWorking,
+		LifeIdle,
+		LifeStopped,
+		LifeDone,
+	}
+	for i := 1; i < len(order); i++ {
+		if AttentionRank(order[i-1]) >= AttentionRank(order[i]) {
+			t.Fatalf("%s must rank ahead of %s", order[i-1], order[i])
+		}
+	}
+}
+
+func TestGroupPrioritizesProjectsNeedingIntervention(t *testing.T) {
+	now := time.Now()
+	agents := []Agent{
+		{ID: "working-1", Kind: KindInteractive, Life: LifeWorking, Project: "/p/busy", UpdatedAt: now},
+		{ID: "working-2", Kind: KindBackground, Life: LifeWorking, Project: "/p/busy", UpdatedAt: now},
+		{ID: "error-bg", Kind: KindBackground, Life: LifeError, Project: "/p/error", UpdatedAt: now.Add(-time.Hour)},
+		{ID: "error-interactive", Kind: KindInteractive, Life: LifeError, Project: "/p/error", UpdatedAt: now.Add(-2 * time.Hour)},
+		{ID: "input", Kind: KindBackground, Life: LifeInput, Project: "/p/input", UpdatedAt: now.Add(-3 * time.Hour)},
+	}
+
+	projs := group(agents)
+	gotProjects := []string{projs[0].Key, projs[1].Key, projs[2].Key}
+	wantProjects := []string{"/p/input", "/p/error", "/p/busy"}
+	for i := range wantProjects {
+		if gotProjects[i] != wantProjects[i] {
+			t.Fatalf("project order = %v, want %v", gotProjects, wantProjects)
+		}
+	}
+	if got := projs[1].Agents[0].ID; got != "error-interactive" {
+		t.Errorf("equal-rank interactive agent should sort first, got %q", got)
+	}
+}
+
+func TestGroupAttentionTiesUseCountThenRecency(t *testing.T) {
+	now := time.Now()
+	agents := []Agent{
+		{ID: "more-1", Life: LifeError, Project: "/p/more", UpdatedAt: now.Add(-3 * time.Hour)},
+		{ID: "more-2", Life: LifeError, Project: "/p/more", UpdatedAt: now.Add(-4 * time.Hour)},
+		{ID: "recent", Life: LifeError, Project: "/p/recent", UpdatedAt: now},
+		{ID: "older", Life: LifeError, Project: "/p/older", UpdatedAt: now.Add(-time.Hour)},
+	}
+
+	projs := group(agents)
+	got := []string{projs[0].Key, projs[1].Key, projs[2].Key}
+	want := []string{"/p/more", "/p/recent", "/p/older"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("project tie order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestGroupRecencyUsesBestAttentionRankOnly(t *testing.T) {
+	now := time.Now()
+	agents := []Agent{
+		{ID: "error-a", Life: LifeError, Project: "/p/a", UpdatedAt: now.Add(-time.Hour)},
+		{ID: "working-a", Life: LifeWorking, Project: "/p/a", UpdatedAt: now.Add(time.Hour)},
+		{ID: "error-b", Life: LifeError, Project: "/p/b", UpdatedAt: now},
+	}
+
+	projs := group(agents)
+	if got := projs[0].Key; got != "/p/b" {
+		t.Errorf("lower-priority activity changed project recency order: got %q", got)
+	}
+}
+
 func TestProjectName(t *testing.T) {
 	if got := projectName("/Volumes/SDWORK/git/util/tmux_agent_check"); got != "tmux_agent_check" {
 		t.Errorf("got %q", got)

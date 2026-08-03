@@ -43,17 +43,29 @@ func Collect(now time.Time) (Snapshot, error) {
 	return snap, nil
 }
 
-// lifeRank orders agents within a project: active work first, input next, then
-// idle/live, with finished agents sinking to the bottom.
-var lifeRank = map[Lifecycle]int{
-	LifeInput:   0,
-	LifeWorking: 1,
-	LifeIdle:    2,
-	LifeStale:   3,
-	LifeUnknown: 4,
-	LifeStopped: 5,
-	LifeError:   6,
-	LifeDone:    7,
+// AttentionRank orders lifecycles by how urgently a person needs to act.
+// Routine work follows actionable/uncertain states; completed work sinks.
+func AttentionRank(l Lifecycle) int {
+	switch l {
+	case LifeInput:
+		return 0
+	case LifeError:
+		return 1
+	case LifeStale:
+		return 2
+	case LifeUnknown:
+		return 3
+	case LifeWorking:
+		return 4
+	case LifeIdle:
+		return 5
+	case LifeStopped:
+		return 6
+	case LifeDone:
+		return 7
+	default:
+		return 8
+	}
 }
 
 // group buckets agents by project key and sorts everything for stable display.
@@ -73,8 +85,8 @@ func group(agents []Agent) []Project {
 		sort.SliceStable(p.Agents, func(i, j int) bool {
 			ai, aj := p.Agents[i], p.Agents[j]
 			// Interactive before background when equally ranked.
-			if lifeRank[ai.Life] != lifeRank[aj.Life] {
-				return lifeRank[ai.Life] < lifeRank[aj.Life]
+			if AttentionRank(ai.Life) != AttentionRank(aj.Life) {
+				return AttentionRank(ai.Life) < AttentionRank(aj.Life)
 			}
 			if ai.Kind != aj.Kind {
 				return ai.Kind == KindInteractive
@@ -84,21 +96,44 @@ func group(agents []Agent) []Project {
 		projects = append(projects, *p)
 	}
 
-	// Projects with active work float to the top; then by most-recent activity.
+	// Projects inherit their most urgent agent's rank. More agents at that
+	// rank win ties, then the freshest agent contributing that rank.
 	sort.SliceStable(projects, func(i, j int) bool {
-		wi, wj := projects[i].Working(), projects[j].Working()
-		if wi != wj {
-			return wi > wj
+		ri, ci := projectAttention(projects[i])
+		rj, cj := projectAttention(projects[j])
+		if ri != rj {
+			return ri < rj
 		}
-		return projectLatest(projects[i]).After(projectLatest(projects[j]))
+		if ci != cj {
+			return ci > cj
+		}
+		li, lj := projectLatest(projects[i], ri), projectLatest(projects[j], rj)
+		if !li.Equal(lj) {
+			return li.After(lj)
+		}
+		return projects[i].Key < projects[j].Key
 	})
 	return projects
 }
 
-func projectLatest(p Project) time.Time {
+func projectAttention(p Project) (rank, count int) {
+	rank = AttentionRank(Lifecycle("")) + 1
+	for _, a := range p.Agents {
+		r := AttentionRank(a.Life)
+		switch {
+		case r < rank:
+			rank, count = r, 1
+		case r == rank:
+			count++
+		}
+	}
+	return rank, count
+}
+
+func projectLatest(p Project, rank int) time.Time {
 	var latest time.Time
 	for _, a := range p.Agents {
-		if a.UpdatedAt.After(latest) {
+		if AttentionRank(a.Life) == rank && a.UpdatedAt.After(latest) {
 			latest = a.UpdatedAt
 		}
 	}

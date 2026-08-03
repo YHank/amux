@@ -3,7 +3,23 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/kyhan/amux/internal/collect"
 )
+
+func TestStatusLineOrdersAttentionFirst(t *testing.T) {
+	snap := collect.Snapshot{Agents: []collect.Agent{
+		{Life: collect.LifeIdle},
+		{Life: collect.LifeWorking},
+		{Life: collect.LifeUnknown},
+		{Life: collect.LifeStale},
+		{Life: collect.LifeError},
+		{Life: collect.LifeInput},
+	}}
+	if got, want := statusLine(snap, true), "◆1 ✖1 ⚠1 ·1 ▶1 ●1"; got != want {
+		t.Errorf("statusLine = %q, want %q", got, want)
+	}
+}
 
 func TestTmuxDQuote(t *testing.T) {
 	cases := []struct {

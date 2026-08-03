@@ -70,8 +70,10 @@ working right now, what's waiting on you, and what's done — grouped by project
 - **Kill, with confirmation** — press `x` on an interactive agent to end its
   pane outright (mux-style); only `y` confirms, any other key backs out.
   Interactive only, for the same reason `c` is.
-- **Active-first** — finished agents are folded away by default (`d` reveals
-  them); the count is always shown, never silently dropped.
+- **Attention-first ordering** — projects and agents sort by required human
+  action: input, error, stale/unknown, working, idle, then stopped/done.
+  New errors remain visible until acknowledged with `a`; acknowledged errors
+  and completed/stopped agents fold into history (`d` reveals them).
 - **Your own notes, local to amux** — press `i` to jot a short note on any
   agent (why it's running, what you're waiting on); saved to disk, shown in
   the list and detail panel, never written back to tmux/Claude/omp.
@@ -79,7 +81,8 @@ working right now, what's waiting on you, and what's done — grouped by project
   selected agent.
 - **Attach in a keystroke** — `Enter` switches to an interactive agent's pane;
   for a background agent it prints the `claude --resume` command.
-- **Statusbar widget** — `amux status` prints a compact `▶2 ◆1` summary.
+- **Statusbar widget** — `amux status` prints the same attention-first summary,
+  for example `◆1 ✖1 ▶2`.
 - **Popup mode** — summon amux as a floating overlay over any session.
 
 ## Scope
@@ -128,9 +131,10 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `Enter` | Attach to the selected agent's pane (or print resume cmd) |
 | `c` | Compose a message and send it into an interactive agent's pane |
 | `x` | Kill the selected agent's pane (y to confirm) |
-| `/` | Filter by name, project, model, or path |
+| `/` | Filter by tool, name, project, model, path, status detail, or saved note |
 | `i` | Add / edit a note on the selected agent |
-| `d` | Show / hide finished agents |
+| `a` | Acknowledge and fold the selected error for this dashboard session |
+| `d` | Show / hide completed, stopped, and acknowledged-error history |
 | `r` | Refresh now |
 | `v` | Toggle the list/detail panes between side-by-side and top/bottom layouts |
 | `m` | Show / hide the detail and terminal-preview pane |

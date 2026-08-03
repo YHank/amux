@@ -61,7 +61,7 @@ func statusCmd() *cobra.Command {
 	return cmd
 }
 
-// statusLine renders "▶2 ◆1 ●3" for active agents, colored for tmux unless plain.
+// statusLine renders attention states first for the tmux status bar.
 func statusLine(snap collect.Snapshot, plain bool) string {
 	c := snap.Counts()
 	order := []struct {
@@ -70,9 +70,11 @@ func statusLine(snap collect.Snapshot, plain bool) string {
 		color string
 	}{
 		{collect.LifeInput, "◆", "colour214"},
+		{collect.LifeError, "✖", "colour196"},
+		{collect.LifeStale, "⚠", "colour208"},
+		{collect.LifeUnknown, "·", "colour244"},
 		{collect.LifeWorking, "▶", "colour42"},
 		{collect.LifeIdle, "●", "colour39"},
-		{collect.LifeStale, "⚠", "colour208"},
 	}
 	var segs []string
 	for _, o := range order {

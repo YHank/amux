@@ -70,6 +70,171 @@ func TestSelectionClampsWhenSelectedAgentVanishes(t *testing.T) {
 	}
 }
 
+func TestActionableErrorsStayVisibleByDefault(t *testing.T) {
+	m := Model{snap: projSnap(
+		mkAgent("error", collect.LifeError),
+		mkAgent("done", collect.LifeDone),
+		mkAgent("stopped", collect.LifeStopped),
+		mkAgent("working", collect.LifeWorking),
+	)}
+	m.rebuildRows()
+
+	if m.hidden != 2 {
+		t.Fatalf("hidden count = %d, want only done and stopped hidden", m.hidden)
+	}
+	got := make([]string, 0, len(m.selRows))
+	for _, ri := range m.selRows {
+		got = append(got, m.rows[ri].agent.ID)
+	}
+	if want := []string{"error", "working"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("visible agents = %v, want %v", got, want)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = next.(Model)
+	if m.hidden != 3 {
+		t.Fatalf("acknowledged error left hidden count %d, want 3", m.hidden)
+	}
+	if got := m.selectedAgent(); got == nil || got.ID != "working" {
+		t.Errorf("after acknowledging error selected %v, want working agent", got)
+	}
+	if got := m.notice; got != "acknowledged error" {
+		t.Errorf("acknowledgement notice = %q", got)
+	}
+
+	m.showDone = true
+	m.rebuildRows()
+	if len(m.selRows) != 4 {
+		t.Errorf("showDone exposed %d agents, want 4", len(m.selRows))
+	}
+	if got := m.rows[m.selRows[0]].agent.ID; got != "working" {
+		t.Errorf("history mode promoted %q over working agent", got)
+	}
+}
+
+func TestAcknowledgedErrorNoLongerPrioritizesProject(t *testing.T) {
+	now := time.Now()
+	m := Model{
+		snap: collect.Snapshot{Projects: []collect.Project{
+			{
+				Key:  "/error",
+				Name: "error",
+				Agents: []collect.Agent{
+					{ID: "error", Life: collect.LifeError, UpdatedAt: now},
+					{ID: "working", Life: collect.LifeWorking, UpdatedAt: now},
+				},
+			},
+			{
+				Key:    "/stale",
+				Name:   "stale",
+				Agents: []collect.Agent{{ID: "stale", Life: collect.LifeStale, UpdatedAt: now.Add(-time.Hour)}},
+			},
+		}},
+		acknowledged: map[string]bool{"error": true},
+	}
+
+	m.rebuildRows()
+	if got := m.rows[0].project.Key; got != "/stale" {
+		t.Errorf("acknowledged error project stayed ahead of stale attention: got %q", got)
+	}
+	m.showDone = true
+	m.rebuildRows()
+	if got := m.rows[0].project.Key; got != "/stale" {
+		t.Errorf("history mode re-promoted acknowledged error project: got %q", got)
+	}
+}
+
+func TestAcknowledgedErrorDoesNotAffectAttentionRecency(t *testing.T) {
+	now := time.Now()
+	m := Model{
+		snap: collect.Snapshot{Projects: []collect.Project{
+			{
+				Key:  "/a",
+				Name: "a",
+				Agents: []collect.Agent{
+					{ID: "error", Life: collect.LifeError, UpdatedAt: now.Add(time.Hour)},
+					{ID: "working-a", Life: collect.LifeWorking, UpdatedAt: now.Add(-time.Hour)},
+				},
+			},
+			{
+				Key:    "/b",
+				Name:   "b",
+				Agents: []collect.Agent{{ID: "working-b", Life: collect.LifeWorking, UpdatedAt: now}},
+			},
+		}},
+		acknowledged: map[string]bool{"error": true},
+		showDone:     true,
+	}
+
+	m.rebuildRows()
+	if got := m.rows[0].project.Key; got != "/b" {
+		t.Errorf("acknowledged error changed project recency order: got %q", got)
+	}
+}
+
+func TestAcknowledgedErrorsDoNotIncreaseHistoryProjectCount(t *testing.T) {
+	m := Model{
+		snap: collect.Snapshot{Projects: []collect.Project{
+			{
+				Key:  "/a",
+				Name: "a",
+				Agents: []collect.Agent{
+					{ID: "stopped-a", Life: collect.LifeStopped},
+					{ID: "error-a1", Life: collect.LifeError},
+					{ID: "error-a2", Life: collect.LifeError},
+				},
+			},
+			{
+				Key:  "/b",
+				Name: "b",
+				Agents: []collect.Agent{
+					{ID: "stopped-b1", Life: collect.LifeStopped},
+					{ID: "stopped-b2", Life: collect.LifeStopped},
+				},
+			},
+		}},
+		acknowledged: map[string]bool{"error-a1": true, "error-a2": true},
+		showDone:     true,
+	}
+
+	m.rebuildRows()
+	if got := m.rows[0].project.Key; got != "/b" {
+		t.Errorf("acknowledged errors inflated history project count: got %q", got)
+	}
+}
+
+func TestHeaderListsAttentionStatesFirst(t *testing.T) {
+	agents := []collect.Agent{
+		mkAgent("working", collect.LifeWorking),
+		mkAgent("input", collect.LifeInput),
+		mkAgent("idle", collect.LifeIdle),
+		mkAgent("stale", collect.LifeStale),
+		mkAgent("error", collect.LifeError),
+		mkAgent("unknown", collect.LifeUnknown),
+	}
+	m := Model{snap: collect.Snapshot{Agents: agents}, width: 200}
+	header := m.renderHeader()
+
+	labels := []string{"input", "error", "stale", "unknown", "working", "idle"}
+	last := -1
+	for _, label := range labels {
+		at := strings.Index(header, label)
+		if at <= last {
+			t.Fatalf("header attention order is wrong at %q: %q", label, header)
+		}
+		last = at
+	}
+
+	m.acknowledged = map[string]bool{"error": true}
+	header = m.renderHeader()
+	if strings.Contains(header, "error") {
+		t.Errorf("acknowledged error remained in attention header: %q", header)
+	}
+	if !strings.Contains(header, "history") {
+		t.Errorf("acknowledged error was not represented as history: %q", header)
+	}
+}
+
 func projSnap(agents ...collect.Agent) collect.Snapshot {
 	return collect.Snapshot{Projects: []collect.Project{{Key: "/p", Name: "p", Agents: agents}}}
 }

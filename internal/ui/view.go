@@ -101,8 +101,20 @@ func vline(h int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m Model) attentionCounts() (map[collect.Lifecycle]int, int) {
+	counts := m.snap.Counts()
+	history := counts[collect.LifeDone] + counts[collect.LifeStopped]
+	for _, a := range m.snap.Agents {
+		if a.Life == collect.LifeError && m.acknowledged[a.ID] {
+			counts[collect.LifeError]--
+			history++
+		}
+	}
+	return counts, history
+}
+
 func (m Model) renderHeader() string {
-	c := m.snap.Counts()
+	c, history := m.attentionCounts()
 	title := styleTitle.Render("amux")
 	sub := styleFaint.Render("agent tracker")
 
@@ -113,15 +125,14 @@ func (m Model) renderHeader() string {
 			segs = append(segs, st.Render(fmt.Sprintf("%s %d %s", lifeGlyph(l), c[l], label)))
 		}
 	}
-	add(collect.LifeWorking, "working")
 	add(collect.LifeInput, "input")
-	add(collect.LifeIdle, "idle")
-	add(collect.LifeStale, "stale")
 	add(collect.LifeError, "error")
-	// Collapse finished states into one muted count.
-	fin := c[collect.LifeDone] + c[collect.LifeStopped]
-	if fin > 0 {
-		segs = append(segs, styleMuted.Render(fmt.Sprintf("✓ %d done", fin)))
+	add(collect.LifeStale, "stale")
+	add(collect.LifeUnknown, "unknown")
+	add(collect.LifeWorking, "working")
+	add(collect.LifeIdle, "idle")
+	if history > 0 {
+		segs = append(segs, styleMuted.Render(fmt.Sprintf("↷ %d history", history)))
 	}
 
 	left := title + " " + sub
@@ -147,13 +158,17 @@ func (m Model) renderFooter() string {
 	if m.filtering {
 		return truncateWidth(styleTitle.Render("/")+m.filter+styleFaint.Render("▏  (enter to apply · esc to clear)"), m.width)
 	}
-	doneKey := "d done"
+	historyKey := "d history"
 	if m.hidden > 0 && !m.showDone {
-		doneKey = fmt.Sprintf("d +%d done", m.hidden)
+		historyKey = fmt.Sprintf("d +%d hidden", m.hidden)
+	} else if m.showDone {
+		historyKey = "d hide history"
 	}
-	keys := []string{
-		"j/k move", "enter attach", "c send", "x kill", "/ filter", "i note", doneKey, "v layout", "m preview", "q quit",
+	keys := []string{"j/k move", "enter attach", "c send", "x kill", "/ filter", "i note"}
+	if a := m.selectedAgent(); a != nil && a.Life == collect.LifeError {
+		keys = append(keys, "a acknowledge")
 	}
+	keys = append(keys, historyKey, "v layout", "m preview", "q quit")
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
 	switch {
@@ -187,7 +202,7 @@ func (m Model) renderList(w, h int) string {
 		case m.filter != "":
 			empty = "no agents match “" + m.filter + "”"
 		case m.hidden > 0:
-			empty = fmt.Sprintf("no active agents · %d finished (press d to show)", m.hidden)
+			empty = fmt.Sprintf("no active agents · %d hidden (press d to show)", m.hidden)
 		default:
 			empty = "no AI agents found"
 		}
