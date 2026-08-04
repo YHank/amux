@@ -651,6 +651,8 @@ func (m *Model) rebuildRows() {
 
 func agentMatches(a *collect.Agent, p *collect.Project, note, f string) bool {
 	return strings.Contains(strings.ToLower(a.Name), f) ||
+		strings.Contains(strings.ToLower(a.Session), f) ||
+		strings.Contains(strings.ToLower(a.Window), f) ||
 		strings.Contains(strings.ToLower(a.Detail), f) ||
 		strings.Contains(strings.ToLower(a.Tool), f) ||
 		strings.Contains(strings.ToLower(a.Model), f) ||

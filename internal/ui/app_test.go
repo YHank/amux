@@ -381,6 +381,89 @@ func TestSlashFilterMatchesToolWhenPaneNameDiffers(t *testing.T) {
 	}
 }
 
+func TestAgentRowNameIncludesTmuxWindow(t *testing.T) {
+	interactive := collect.Agent{
+		Kind: collect.KindInteractive, Name: "work:2.1", Session: "work", Window: "editor", Tool: "claude",
+	}
+	if got := agentRowName(&interactive); got != "claude · work » editor" {
+		t.Errorf("interactive row name = %q, want %q", got, "claude · work » editor")
+	}
+
+	interactive.Window = ""
+	if got := agentRowName(&interactive); got != "claude · work:2.1" {
+		t.Errorf("window-less interactive row name = %q, want name fallback", got)
+	}
+
+	background := collect.Agent{Kind: collect.KindBackground, Name: "job", Session: "work", Window: "editor", Tool: "claude"}
+	if got := agentRowName(&background); got != "claude · job" {
+		t.Errorf("background row name = %q, want name fallback", got)
+	}
+}
+
+func TestRenderAgentRowIncludesWindowBeforeNote(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	agent := collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, Name: "work:2.1",
+		Session: "work", Window: "editor", Tool: "claude",
+	}
+	store := notes.Load()
+	store.Set(agent.ID, "ship it")
+	m := Model{notesStore: store}
+
+	row := m.renderAgentRow(&agent, 120, false, time.Now())
+	nameAt, noteAt := strings.Index(row, "work » editor"), strings.Index(row, "» ship it")
+	if nameAt < 0 || noteAt < 0 || nameAt >= noteAt {
+		t.Errorf("row = %q, want window name before note", row)
+	}
+}
+
+func TestSlashFilterMatchesTmuxWindow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	editor := collect.Agent{
+		ID: "editor", Kind: collect.KindInteractive, Life: collect.LifeWorking, Project: "/p",
+		Name: "work:2.1", Session: "work", Window: "editor",
+	}
+	deploy := editor
+	deploy.ID = "deploy"
+	deploy.Name = "work:3.1"
+	deploy.Window = "deploy"
+	m := Model{snap: projSnap(editor, deploy), notesStore: notes.Load()}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("editor")})
+	m = next.(Model)
+	if len(m.selRows) != 1 {
+		t.Fatalf("window filter matched %d agents, want 1", len(m.selRows))
+	}
+	if got := m.selectedAgent(); got == nil || got.ID != editor.ID {
+		t.Errorf("window filter selected %v, want editor agent", got)
+	}
+}
+
+func TestSnapshotRefreshUpdatesTmuxWindowName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	agent := collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, Life: collect.LifeWorking, Project: "/p",
+		Name: "work:2.1", Session: "work", Window: "old-window",
+	}
+	m := Model{snap: projSnap(agent), notesStore: notes.Load(), width: 100, height: 12}
+	m.rebuildRows()
+
+	agent.Window = "new-window"
+	next, _ := m.Update(snapshotMsg{snap: projSnap(agent)})
+	m = next.(Model)
+	if list := m.renderList(100, 12); !strings.Contains(list, "work » new-window") {
+		t.Errorf("refreshed list = %q, want updated tmux window name", list)
+	}
+}
+
 // Only a live Claude daemon exposes the native manager action.
 func TestBackgroundClaudeActionsRequireLiveClaude(t *testing.T) {
 	live := collect.Agent{

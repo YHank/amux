@@ -267,11 +267,11 @@ func (m Model) renderAgentRow(a *collect.Agent, w int, selected bool, now time.T
 	glyph := lipgloss.NewStyle().Foreground(lifeColor(a.Life)).Render(lifeGlyph(a.Life))
 	kind := styleFaint.Render(kindGlyph(a.Kind))
 
-	name := agentRowName(a)
 	nameStyle := stylePanel
 	if selected {
 		nameStyle = styleSel
 	}
+	name := renderAgentRowName(a, nameStyle, selected)
 
 	// Right-aligned meta: model + tokens/cpu + age.
 	meta := agentMeta(a, now)
@@ -281,7 +281,7 @@ func (m Model) renderAgentRow(a *collect.Agent, w int, selected bool, now time.T
 		cursor = styleSel.Render("❯ ")
 	}
 
-	left := fmt.Sprintf("%s%s %s %s", cursor, glyph, kind, nameStyle.Render(name))
+	left := fmt.Sprintf("%s%s %s %s", cursor, glyph, kind, name)
 	if note := m.notesStore.Get(a.ID); note != "" {
 		left += "  " + styleNote.Render("» "+note)
 	}
@@ -301,11 +301,28 @@ func (m Model) renderAgentRow(a *collect.Agent, w int, selected bool, now time.T
 
 func agentRowName(a *collect.Agent) string {
 	name := a.Name
+	if a.Kind == collect.KindInteractive && a.Session != "" && a.Window != "" {
+		name = a.Session + " » " + a.Window
+	}
 	tool := strings.TrimSpace(a.Tool)
 	if tool == "" || strings.Contains(strings.ToLower(name), strings.ToLower(tool)) {
 		return name
 	}
 	return tool + " · " + name
+}
+
+func renderAgentRowName(a *collect.Agent, style lipgloss.Style, selected bool) string {
+	name := agentRowName(a)
+	if a.Kind != collect.KindInteractive || a.Session == "" || a.Window == "" {
+		return style.Render(name)
+	}
+
+	prefix := strings.TrimSuffix(name, a.Window)
+	windowStyle := styleWindow
+	if selected {
+		windowStyle = windowStyle.Bold(true)
+	}
+	return style.Render(prefix) + windowStyle.Render(a.Window)
 }
 
 // agentMeta builds the compact right-hand metadata string for a row.

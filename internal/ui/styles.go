@@ -30,6 +30,7 @@ var (
 	styleMeta      = lipgloss.NewStyle().Foreground(cBlue)
 	styleDetailKey = lipgloss.NewStyle().Foreground(cFaint)
 	styleNote      = lipgloss.NewStyle().Italic(true).Foreground(cNote)
+	styleWindow    = lipgloss.NewStyle().Foreground(cBlue)
 
 	styleDivider = lipgloss.NewStyle().Foreground(cFaint)
 	stylePanel   = lipgloss.NewStyle().Foreground(cText)

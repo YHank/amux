@@ -78,6 +78,7 @@ type Agent struct {
 	// Interactive-only fields.
 	TmuxTarget string   // "session:win.pane" — attach target
 	Session    string   // tmux session name
+	Window     string   // tmux window name
 	PID        int      // foreground agent pid
 	CPU        float64  // %CPU of the agent process subtree
 	Preview    []string // last few lines of the pane's actual terminal output

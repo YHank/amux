@@ -31,6 +31,22 @@ func TestDetectTool(t *testing.T) {
 	}
 }
 
+func TestParsePaneLine(t *testing.T) {
+	pn, ok := parsePaneLine("work\x1feditor\x1fwork:2.1\x1f%7\x1f1234\x1f/tmp/project\x1fClaude\x1f1")
+	if !ok {
+		t.Fatal("parsePaneLine returned false for a complete pane line")
+	}
+	if pn.session != "work" || pn.window != "editor" || pn.target != "work:2.1" ||
+		pn.paneID != "%7" || pn.pid != 1234 || pn.path != "/tmp/project" ||
+		pn.title != "Claude" || !pn.active {
+		t.Errorf("parsePaneLine() = %#v, want all pane fields preserved", pn)
+	}
+
+	if _, ok := parsePaneLine("work\x1feditor\x1fwork:2.1\x1f%7\x1f1234\x1f/tmp/project\x1fClaude"); ok {
+		t.Error("parsePaneLine accepted a line with fewer than eight fields")
+	}
+}
+
 func TestAppendLiveBackgroundsExcludesPersistedRecords(t *testing.T) {
 	interactive := Agent{ID: "pane", Kind: KindInteractive, Tool: "claude"}
 	live := Agent{ID: "live", Kind: KindBackground, Tool: "claude", Live: true}

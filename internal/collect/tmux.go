@@ -10,6 +10,7 @@ import (
 // pane is one tmux pane as reported by `tmux list-panes`.
 type pane struct {
 	session string
+	window  string
 	target  string // session:win.pane
 	paneID  string // %<n>, stable across renames
 	pid     int
@@ -18,7 +19,7 @@ type pane struct {
 	active  bool
 }
 
-const paneFormat = "#{session_name}\x1f#{session_name}:#{window_index}.#{pane_index}" +
+const paneFormat = "#{session_name}\x1f#{window_name}\x1f#{session_name}:#{window_index}.#{pane_index}" +
 	"\x1f#{pane_id}\x1f#{pane_pid}\x1f#{pane_current_path}\x1f#{pane_title}\x1f#{?pane_active,1,0}"
 
 // TmuxRunning reports whether a tmux server is up. When false, amux still works
@@ -40,22 +41,31 @@ func listPanes() ([]pane, error) {
 		if line == "" {
 			continue
 		}
-		f := strings.Split(line, "\x1f")
-		if len(f) < 7 {
+		pn, ok := parsePaneLine(line)
+		if !ok {
 			continue
 		}
-		pid, _ := strconv.Atoi(f[3])
-		panes = append(panes, pane{
-			session: f[0],
-			target:  f[1],
-			paneID:  f[2],
-			pid:     pid,
-			path:    f[4],
-			title:   f[5],
-			active:  f[6] == "1",
-		})
+		panes = append(panes, pn)
 	}
 	return panes, nil
+}
+
+func parsePaneLine(line string) (pane, bool) {
+	f := strings.Split(line, "\x1f")
+	if len(f) < 8 {
+		return pane{}, false
+	}
+	pid, _ := strconv.Atoi(f[4])
+	return pane{
+		session: f[0],
+		window:  f[1],
+		target:  f[2],
+		paneID:  f[3],
+		pid:     pid,
+		path:    f[5],
+		title:   f[6],
+		active:  f[7] == "1",
+	}, true
 }
 
 // previewLines is how many trailing lines of a pane's real content amux reads
@@ -88,6 +98,7 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 		}
 		agents = append(agents, Agent{
 			ID:         pn.paneID,
+			Window:     pn.window,
 			Kind:       KindInteractive,
 			Tool:       tool,
 			Name:       pn.target,
