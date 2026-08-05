@@ -267,8 +267,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// A first OMP note can be prefilled from its tmux title (for example,
-	// "π: fix student-search dropdown"). y accepts the suggestion, n opens a
-	// blank editor, and esc cancels the note request.
+	// "π: fix student-search dropdown"). y or enter accepts the suggestion, n
+	// opens a blank editor, and esc cancels the note request.
 	if m.suggestingNote {
 		a := m.selectedAgent()
 		if a == nil || a.ID != m.suggestedNoteID {
@@ -276,7 +276,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "y", "Y":
+		case "y", "Y", "enter":
 			m.noteInput = m.suggestedNote
 		case "n", "N":
 			m.noteInput = ""

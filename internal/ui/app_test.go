@@ -645,6 +645,28 @@ func TestFirstInteractiveOMPNoteOffersTitleAsPrefill(t *testing.T) {
 	}
 }
 
+func TestEnterAcceptsOMPTitleSuggestion(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	omp := collect.Agent{
+		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "dynamic title",
+	}
+	m := Model{snap: projSnap(omp), notesStore: notes.Load()}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if m.suggestingNote || !m.naming {
+		t.Fatalf("enter should accept the suggestion: suggesting=%v naming=%v", m.suggestingNote, m.naming)
+	}
+	if got, want := m.noteInput, "dynamic title"; got != want {
+		t.Errorf("enter-prefilled note = %q, want %q", got, want)
+	}
+}
+
 func TestOMPSuggestedNoteEscCancels(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -683,7 +705,7 @@ func TestOMPSuggestedNoteIgnoresOtherKeysAndCancelsAfterPaneRefresh(t *testing.T
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
-	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = next.(Model)
 	if !m.suggestingNote || m.naming {
 		t.Fatalf("unrelated key should leave the suggestion pending: suggesting=%v naming=%v", m.suggestingNote, m.naming)

@@ -156,7 +156,7 @@ func (m Model) renderFooter() string {
 	}
 	if m.suggestingNote {
 		return truncateWidth(styleTitle.Render("use OMP task as note: "+m.suggestedNote+"?")+
-			styleFaint.Render("  y to prefill · n for blank · esc to cancel"), m.width)
+			styleFaint.Render("  y/enter to prefill · n for blank · esc to cancel"), m.width)
 	}
 	if m.composing {
 		return truncateWidth(styleTitle.Render("send: ")+m.composeInput+styleFaint.Render("▏  (enter to send · esc to cancel)"), m.width)
