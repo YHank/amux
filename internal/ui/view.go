@@ -154,6 +154,10 @@ func (m Model) renderFooter() string {
 		return truncateWidth(lipgloss.NewStyle().Foreground(cRed).Bold(true).Render("kill "+m.killName+"?")+
 			styleFaint.Render("  y to confirm · any other key cancels"), m.width)
 	}
+	if m.suggestingNote {
+		return truncateWidth(styleTitle.Render("use OMP task as note: "+m.suggestedNote+"?")+
+			styleFaint.Render("  y to prefill · n for blank · esc to cancel"), m.width)
+	}
 	if m.composing {
 		return truncateWidth(styleTitle.Render("send: ")+m.composeInput+styleFaint.Render("▏  (enter to send · esc to cancel)"), m.width)
 	}

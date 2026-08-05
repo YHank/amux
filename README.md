@@ -73,7 +73,9 @@ working right now, what's waiting on you, and what's done — grouped by project
   and completed/stopped agents fold into history (`d` reveals them).
 - **Your own notes, local to amux** — press `i` to jot a short note on any
   agent (why it's running, what you're waiting on); saved to disk, shown in
-  the list and detail panel, never written back to tmux/Claude/omp.
+  the list and detail panel, never written back to tmux/Claude/omp. For a
+  first note on an interactive OMP pane, amux asks whether to prefill the note
+  from that pane's current tmux title.
 - **Live detail** — model, tokens, CPU, age, and the original task for the
   selected agent.
 - **Attach or manage in a keystroke** — `Enter` switches to an interactive
@@ -131,7 +133,7 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `c` | Compose a message and send it into an interactive agent's pane |
 | `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
 | `/` | Filter by tool, name, project, model, path, status detail, or saved note |
-| `i` | Add / edit a note on the selected agent |
+| `i` | Add / edit a note; for a first interactive OMP note, choose whether to prefill its tmux task title |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
 | `d` | Show / hide completed, stopped, and acknowledged-error history |
 | `r` | Refresh now |

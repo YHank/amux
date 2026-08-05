@@ -109,6 +109,7 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 			Project:    projectKey(pn.path),
 			TmuxTarget: pn.target,
 			Session:    pn.session,
+			PaneTitle:  pn.title,
 			PID:        ap.pid,
 			CPU:        procs.subtreeCPU(ap.pid),
 			Preview:    preview,

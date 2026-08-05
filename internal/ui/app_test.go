@@ -610,6 +610,160 @@ func TestComposeEnterWithEmptyTextDoesNotSend(t *testing.T) {
 	}
 }
 
+func TestFirstInteractiveOMPNoteOffersTitleAsPrefill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	omp := collect.Agent{
+		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane",
+		PaneTitle: "Handle dynamic OMP titles correctly",
+	}
+	m := Model{snap: projSnap(omp), notesStore: notes.Load(), width: 200}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if !m.suggestingNote || m.naming {
+		t.Fatalf("first OMP note should ask before editing: suggesting=%v naming=%v", m.suggestingNote, m.naming)
+	}
+	if !strings.Contains(m.renderFooter(), "Handle dynamic OMP titles correctly") {
+		t.Errorf("suggestion prompt did not show OMP task: %q", m.renderFooter())
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = next.(Model)
+	if m.suggestingNote || !m.naming {
+		t.Fatalf("y should open the note editor: suggesting=%v naming=%v", m.suggestingNote, m.naming)
+	}
+	if got, want := m.noteInput, "Handle dynamic OMP titles correctly"; got != want {
+		t.Errorf("suggested note = %q, want %q", got, want)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got, want := next.(Model).notesStore.Get("omp-pane"), "Handle dynamic OMP titles correctly"; got != want {
+		t.Errorf("saved suggested note = %q, want %q", got, want)
+	}
+}
+
+func TestOMPSuggestedNoteEscCancels(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	omp := collect.Agent{
+		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "task",
+	}
+	m := Model{snap: projSnap(omp), notesStore: notes.Load()}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if m.suggestingNote || m.naming || m.noteInput != "" {
+		t.Fatalf("esc should cancel the suggestion: suggesting=%v naming=%v note=%q", m.suggestingNote, m.naming, m.noteInput)
+	}
+	if cmd != nil || m.notesStore.Get("omp-pane") != "" {
+		t.Fatal("esc should not save or send anything")
+	}
+}
+
+func TestOMPSuggestedNoteIgnoresOtherKeysAndCancelsAfterPaneRefresh(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	omp := collect.Agent{
+		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "task",
+	}
+	other := collect.Agent{
+		ID: "other-pane", Kind: collect.KindInteractive, Tool: "claude",
+		Life: collect.LifeWorking, Project: "/p", Name: "other-pane",
+	}
+	m := Model{snap: projSnap(omp, other), notesStore: notes.Load()}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if !m.suggestingNote || m.naming {
+		t.Fatalf("unrelated key should leave the suggestion pending: suggesting=%v naming=%v", m.suggestingNote, m.naming)
+	}
+
+	next, _ = m.Update(snapshotMsg{snap: projSnap(other)})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = next.(Model)
+	if m.suggestingNote || m.naming || m.noteInput != "" {
+		t.Fatalf("refresh without the source pane should cancel the suggestion: suggesting=%v naming=%v note=%q", m.suggestingNote, m.naming, m.noteInput)
+	}
+	if m.notesStore.Get("other-pane") != "" {
+		t.Fatal("vanished OMP pane's suggestion must not be saved on another pane")
+	}
+}
+
+func TestAcceptedOMPSuggestedNoteCancelsIfSourcePaneDisappears(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	omp := collect.Agent{
+		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "task",
+	}
+	other := collect.Agent{
+		ID: "other-pane", Kind: collect.KindInteractive, Tool: "claude",
+		Life: collect.LifeWorking, Project: "/p", Name: "other-pane",
+	}
+	m := Model{snap: projSnap(omp, other), notesStore: notes.Load()}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = next.(Model)
+	if !m.naming || m.namingAgentID != "omp-pane" {
+		t.Fatalf("accepted suggestion should remain owned by its source: naming=%v owner=%q", m.naming, m.namingAgentID)
+	}
+
+	next, _ = m.Update(snapshotMsg{snap: projSnap(other)})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if m.naming || m.namingAgentID != "" || m.noteInput != "" {
+		t.Fatalf("refresh without the source pane should cancel note editing: naming=%v owner=%q note=%q", m.naming, m.namingAgentID, m.noteInput)
+	}
+	if m.notesStore.Get("other-pane") != "" {
+		t.Fatal("accepted OMP title must not be saved on another pane")
+	}
+}
+
+func TestOMPSuggestedNoteCanBeDeclinedAndDoesNotRepeatForExistingNote(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	omp := collect.Agent{
+		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "task",
+	}
+	m := Model{snap: projSnap(omp), notesStore: notes.Load()}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = next.(Model)
+	if m.suggestingNote || !m.naming || m.noteInput != "" {
+		t.Fatalf("declining should open a blank editor: %#v", m)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("manual note")})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if m.suggestingNote || !m.naming {
+		t.Fatalf("existing OMP note should open directly: suggesting=%v naming=%v", m.suggestingNote, m.naming)
+	}
+	if got, want := m.noteInput, "manual note"; got != want {
+		t.Errorf("existing note = %q, want %q", got, want)
+	}
+}
+
 // TestXNoLongerQuits guards the exact regression reported: x used to be an
 // alias for quit, which collided with its intended meaning (kill the
 // selected agent, mux-style). Only q/ctrl+c may quit.

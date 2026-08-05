@@ -61,12 +61,15 @@ type Model struct {
 	hideDetail      bool            // hide the detail pane so the list fills the viewport
 	preferencesPath string
 	notesStore      *notes.Store
-	naming          bool // capturing a note for the selected agent
+	suggestingNote  bool   // asking whether to prefill a first OMP note from its tmux title
+	suggestedNote   string // OMP task title offered as the note prefill
+	suggestedNoteID string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
+	naming          bool   // capturing a note for the selected agent
+	namingAgentID   string // agent that owns the in-progress note
 	noteInput       string
-
-	composing    bool // capturing a message to send into the selected agent's pane
-	composeInput string
-	notice       string // brief, self-clearing status line (e.g. "sent to <pane>")
+	composing       bool // capturing a message to send into the selected agent's pane
+	composeInput    string
+	notice          string // brief, self-clearing status line (e.g. "sent to <pane>")
 
 	confirmingKill bool // "kill <pane>? y to confirm" — any other key cancels
 	killTarget     string
@@ -196,6 +199,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pruneAcknowledged()
 		m.pruneDismissed()
 		m.rebuildRows()
+		if m.suggestingNote {
+			if a := m.selectedAgent(); a == nil || a.ID != m.suggestedNoteID {
+				m.clearNoteSuggestion()
+			}
+		}
+		if m.naming {
+			if a := m.selectedAgent(); a == nil || a.ID != m.namingAgentID {
+				m.naming = false
+				m.namingAgentID = ""
+				m.noteInput = ""
+			}
+		}
 		return m, nil
 
 	case sentMsg:
@@ -221,6 +236,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func ompNoteSuggestion(a *collect.Agent) string {
+	if a == nil || a.Kind != collect.KindInteractive || a.Tool != "omp" {
+		return ""
+	}
+	title := strings.TrimSpace(a.PaneTitle)
+	if title == "" {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(title, "π:"))
+}
+
+func (m *Model) clearNoteSuggestion() {
+	m.suggestingNote = false
+	m.suggestedNote = ""
+	m.suggestedNoteID = ""
+}
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Kill confirmation: only y/Y confirms; every other key cancels, no
 	// exceptions — a destructive action should never fire on a stray keypress.
@@ -232,6 +263,33 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if s := msg.String(); s == "y" || s == "Y" {
 			return m, killPane(target, name)
 		}
+		return m, nil
+	}
+
+	// A first OMP note can be prefilled from its tmux title (for example,
+	// "π: fix student-search dropdown"). y accepts the suggestion, n opens a
+	// blank editor, and esc cancels the note request.
+	if m.suggestingNote {
+		a := m.selectedAgent()
+		if a == nil || a.ID != m.suggestedNoteID {
+			m.clearNoteSuggestion()
+			return m, nil
+		}
+		switch msg.String() {
+		case "y", "Y":
+			m.noteInput = m.suggestedNote
+		case "n", "N":
+			m.noteInput = ""
+		case "esc":
+			m.noteInput = ""
+			m.clearNoteSuggestion()
+			return m, nil
+		default:
+			return m, nil
+		}
+		m.clearNoteSuggestion()
+		m.namingAgentID = a.ID
+		m.naming = true
 		return m, nil
 	}
 
@@ -262,13 +320,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.naming {
 		switch msg.Type {
 		case tea.KeyEnter:
-			if a := m.selectedAgent(); a != nil {
-				m.notesStore.Set(a.ID, strings.TrimSpace(m.noteInput))
+			if m.namingAgentID != "" {
+				m.notesStore.Set(m.namingAgentID, strings.TrimSpace(m.noteInput))
 			}
 			m.naming = false
+			m.namingAgentID = ""
 			m.rebuildRows()
 		case tea.KeyEsc:
 			m.naming = false
+			m.namingAgentID = ""
 			m.noteInput = ""
 		case tea.KeyBackspace:
 			m.noteInput = dropLastRune(m.noteInput)
@@ -319,8 +379,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 	case "i":
 		if a := m.selectedAgent(); a != nil {
-			m.naming = true
 			m.noteInput = m.notesStore.Get(a.ID)
+			if m.noteInput == "" {
+				if suggestion := ompNoteSuggestion(a); suggestion != "" {
+					m.suggestingNote = true
+					m.suggestedNote = suggestion
+					m.suggestedNoteID = a.ID
+					return m, nil
+				}
+			}
+			m.namingAgentID = a.ID
+			m.naming = true
 		}
 	case "a":
 		if a := m.selectedAgent(); a != nil && a.Life == collect.LifeError {
