@@ -194,6 +194,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		m.recordStatusChangeTimes(&msg.snap)
 		m.snap = msg.snap
 		m.pruneNotes()
 		m.pruneAcknowledged()
@@ -444,6 +445,48 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// recordStatusChangeTimes carries the last observed lifecycle transition across
+// refreshes. Collect is intentionally stateless because interactive lifecycle
+// comes from the current pane contents, so the dashboard owns this comparison.
+func (m Model) recordStatusChangeTimes(next *collect.Snapshot) {
+	previous := make(map[string]collect.Agent, len(m.snap.Agents))
+	for _, agent := range m.snap.Agents {
+		previous[agent.ID] = agent
+	}
+
+	changedAt := make(map[string]time.Time, len(next.Agents))
+	for i := range next.Agents {
+		agent := &next.Agents[i]
+		if prior, ok := previous[agent.ID]; ok && sameAgentInstance(prior, *agent) &&
+			prior.Life == agent.Life && !prior.StatusChangedAt.IsZero() {
+			agent.StatusChangedAt = prior.StatusChangedAt
+		} else {
+			agent.StatusChangedAt = next.Taken
+		}
+		changedAt[agent.ID] = agent.StatusChangedAt
+	}
+
+	for i := range next.Projects {
+		for j := range next.Projects[i].Agents {
+			agent := &next.Projects[i].Agents[j]
+			agent.StatusChangedAt = changedAt[agent.ID]
+		}
+	}
+}
+
+// sameAgentInstance distinguishes a replacement CLI process from a lifecycle
+// change in the same interactive tmux pane. Background IDs are session IDs,
+// while an interactive ID is only the pane ID and must be paired with its PID.
+func sameAgentInstance(prior, current collect.Agent) bool {
+	if prior.Kind != current.Kind {
+		return false
+	}
+	if current.Kind != collect.KindInteractive {
+		return true
+	}
+	return prior.PID != 0 && prior.PID == current.PID
+}
+
 // pruneNotes drops any stored note whose agent isn't in the current snapshot
 // (unfiltered — filtering never removes an agent from m.snap, only from the
 // displayed rows), so notes.json doesn't accumulate labels for finished runs.
@@ -661,6 +704,9 @@ func (m *Model) rebuildRows() {
 			matched = append(matched, a)
 		}
 		sort.SliceStable(matched, func(i, j int) bool {
+			if !matched[i].StatusChangedAt.Equal(matched[j].StatusChangedAt) {
+				return matched[i].StatusChangedAt.After(matched[j].StatusChangedAt)
+			}
 			return visibleAgentRank(matched[i], m.acknowledged) <
 				visibleAgentRank(matched[j], m.acknowledged)
 		})

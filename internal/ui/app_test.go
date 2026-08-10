@@ -320,6 +320,56 @@ func projSnap(agents ...collect.Agent) collect.Snapshot {
 	}
 }
 
+func TestStatusTransitionTimesPersistAcrossRefreshesAndOrderProjectAgents(t *testing.T) {
+	first := time.Date(2026, time.August, 10, 9, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	m := Model{snap: projSnap(
+		collect.Agent{ID: "transitioned", Life: collect.LifeWorking, StatusChangedAt: first, Project: "/p"},
+		collect.Agent{ID: "unchanged", Life: collect.LifeError, StatusChangedAt: first, Project: "/p"},
+	)}
+	next := projSnap(
+		collect.Agent{ID: "transitioned", Life: collect.LifeIdle, Project: "/p"},
+		collect.Agent{ID: "unchanged", Life: collect.LifeError, Project: "/p"},
+	)
+	next.Taken = second
+
+	m.recordStatusChangeTimes(&next)
+	if got := next.Agents[0].StatusChangedAt; !got.Equal(second) {
+		t.Errorf("transition timestamp = %v, want %v", got, second)
+	}
+	if got := next.Agents[1].StatusChangedAt; !got.Equal(first) {
+		t.Errorf("unchanged timestamp = %v, want %v", got, first)
+	}
+	if got := next.Projects[0].Agents[0].StatusChangedAt; !got.Equal(second) {
+		t.Errorf("project transition timestamp = %v, want %v", got, second)
+	}
+
+	m.snap = next
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent.ID; got != "transitioned" {
+		t.Errorf("first project agent = %q, want newest transition", got)
+	}
+}
+
+func TestStatusTransitionTimeResetsForReplacementInteractiveProcess(t *testing.T) {
+	first := time.Date(2026, time.August, 10, 9, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	m := Model{snap: projSnap(collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101,
+		Life: collect.LifeWorking, StatusChangedAt: first, Project: "/p",
+	})}
+	next := projSnap(collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 202,
+		Life: collect.LifeWorking, Project: "/p",
+	})
+	next.Taken = second
+
+	m.recordStatusChangeTimes(&next)
+	if got := next.Agents[0].StatusChangedAt; !got.Equal(second) {
+		t.Errorf("replacement process timestamp = %v, want %v", got, second)
+	}
+}
+
 func TestSlashFilterMatchesSavedNotes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")

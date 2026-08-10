@@ -438,6 +438,19 @@ func TestGroupOrdersProjectsAndAgents(t *testing.T) {
 	}
 }
 
+func TestGroupOrdersProjectAgentsByStatusChangeTime(t *testing.T) {
+	now := time.Now()
+	agents := []Agent{
+		{ID: "older-error", Kind: KindInteractive, Life: LifeError, Project: "/p", StatusChangedAt: now.Add(-time.Minute)},
+		{ID: "newer-idle", Kind: KindBackground, Life: LifeIdle, Project: "/p", StatusChangedAt: now},
+	}
+
+	got := group(agents)[0].Agents
+	if got[0].ID != "newer-idle" || got[1].ID != "older-error" {
+		t.Errorf("project agents = %#v, want newest status transition first", got)
+	}
+}
+
 func TestAttentionRankPriority(t *testing.T) {
 	order := []Lifecycle{
 		LifeInput,

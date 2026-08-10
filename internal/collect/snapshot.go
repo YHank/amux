@@ -82,7 +82,10 @@ func AttentionRank(l Lifecycle) int {
 	}
 }
 
-// group buckets agents by project key and sorts everything for stable display.
+// group buckets agents by project key and sorts project members by their most
+// recently observed lifecycle transition. Ties retain the attention-first
+// ordering so a freshly discovered snapshot stays useful before the UI has a
+// prior state to compare.
 func group(agents []Agent) []Project {
 	byKey := map[string]*Project{}
 	for _, a := range agents {
@@ -98,14 +101,17 @@ func group(agents []Agent) []Project {
 	for _, p := range byKey {
 		sort.SliceStable(p.Agents, func(i, j int) bool {
 			ai, aj := p.Agents[i], p.Agents[j]
-			// Interactive before background when equally ranked.
+			if !ai.StatusChangedAt.Equal(aj.StatusChangedAt) {
+				return ai.StatusChangedAt.After(aj.StatusChangedAt)
+			}
+			// Interactive before background when transition times tie.
 			if AttentionRank(ai.Life) != AttentionRank(aj.Life) {
 				return AttentionRank(ai.Life) < AttentionRank(aj.Life)
 			}
 			if ai.Kind != aj.Kind {
 				return ai.Kind == KindInteractive
 			}
-			return ai.UpdatedAt.After(aj.UpdatedAt)
+			return false
 		})
 		projects = append(projects, *p)
 	}
