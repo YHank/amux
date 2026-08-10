@@ -1,4 +1,4 @@
-<!-- Generated: 2026-07-23 | Updated: 2026-07-23 -->
+<!-- Generated: 2026-07-23 | Updated: 2026-08-10 -->
 
 # amux
 
@@ -22,7 +22,7 @@
 |-----------|---------|
 | `cmd/` | Cobra CLI entrypoint and subcommands (see `cmd/AGENTS.md`). |
 | `internal/` | Non-public collection, notes, and Bubble Tea UI packages (see `internal/AGENTS.md`). |
-| `.claude/` | Local Claude configuration. |
+| `.claude/` | Local Claude configuration and repository recovery tooling (see `.claude/AGENTS.md`). |
 
 ## For AI Agents
 
@@ -44,7 +44,7 @@
 ## Dependencies
 
 ### Internal
-- `cmd/amux` wires CLI commands to `internal/collect`, `internal/notes`, and `internal/ui`.
+- `cmd/amux` wires CLI commands to `internal/collect` and `internal/ui`; `ui` owns its `internal/notes` integration.
 
 ### External
 - `github.com/spf13/cobra` provides CLI parsing.

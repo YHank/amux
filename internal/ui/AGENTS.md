@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-07-23 -->
+<!-- Generated: 2026-07-23 | Updated: 2026-08-10 -->
 
 # ui
 
@@ -15,6 +15,8 @@ Implements the interactive amux dashboard with Bubble Tea: application state and
 | `styles.go` | Lip Gloss style, color, and layout definitions. |
 | `util.go` | Rendering and display helper functions. |
 | `app_test.go` | Unit tests for application update and presentation behavior. |
+| `preferences.go` | Loads and saves persisted detail-panel visibility and layout preferences. |
+| `preferences_test.go` | Unit coverage for preference load and save behavior. |
 
 ## Subdirectories
 

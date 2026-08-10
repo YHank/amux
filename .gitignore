@@ -2,10 +2,12 @@
 /amux
 /dist/
 *.test
+**/*.md
 
 # OMC / Claude Code operational state
 .omc/
 .claude/
+.serena/
 
 # OS
 .DS_Store

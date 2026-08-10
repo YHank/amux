@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-07-23 -->
+<!-- Generated: 2026-07-23 | Updated: 2026-08-10 -->
 
 # amux CLI
 
@@ -12,7 +12,8 @@ Implements the `amux` executable: Cobra command construction, interactive applic
 |------|-------------|
 | `main.go` | Defines the root command, version metadata, and default TUI startup path. |
 | `commands.go` | Defines `popup`, `status`, and `setup-keybind` commands plus tmux configuration helpers. |
-| `action.go` | Dispatches the post-TUI attach action or prints the resume command for a headless agent. |
+| `action.go` | Dispatches post-TUI attach and manage actions: switches tmux context or runs `claude agents`, creating and focusing a tmux window when applicable. |
+| `commands_test.go` | Unit coverage for CLI subcommands and tmux configuration helpers. |
 
 ## Subdirectories
 
@@ -39,9 +40,10 @@ Implements the `amux` executable: Cobra command construction, interactive applic
 
 ### Internal
 - `internal/collect` supplies snapshots and statuses.
-- `internal/ui` runs the Bubble Tea application and owns its transitive note persistence.
+- `internal/ui` supplies the Bubble Tea model and owns its transitive note persistence.
 
 ### External
+- `github.com/charmbracelet/bubbletea` provides the TUI program runtime.
 - `github.com/spf13/cobra` provides command and flag parsing.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

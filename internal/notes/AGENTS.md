@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-07-23 -->
+<!-- Generated: 2026-07-23 | Updated: 2026-08-10 -->
 
 # notes
 
@@ -36,7 +36,7 @@ Persists short, user-authored annotations for tracked agents in an application c
 ## Dependencies
 
 ### Internal
-- Called by `internal/ui` and CLI action handlers.
+- Called by `internal/ui`.
 
 ### External
 - Uses the Go standard library only.
