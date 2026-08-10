@@ -155,7 +155,7 @@ func (m Model) renderFooter() string {
 			styleFaint.Render("  y to confirm · any other key cancels"), m.width)
 	}
 	if m.suggestingNote {
-		return truncateWidth(styleTitle.Render("use OMP task as note: "+m.suggestedNote+"?")+
+		return truncateWidth(styleTitle.Render("use task title as note: "+m.suggestedNote+"?")+
 			styleFaint.Render("  y/enter to prefill · n for blank · esc to cancel"), m.width)
 	}
 	if m.composing {

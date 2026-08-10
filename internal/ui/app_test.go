@@ -660,6 +660,69 @@ func TestComposeEnterWithEmptyTextDoesNotSend(t *testing.T) {
 	}
 }
 
+// TestNoteSuggestionByTool verifies which pane titles become note prefills:
+// omp drops its "π:" prefix, Claude Code drops its leading spinner glyph, and
+// other tools, empty titles, and non-interactive agents offer nothing.
+func TestNoteSuggestionByTool(t *testing.T) {
+	interactive := func(tool, title string) *collect.Agent {
+		return &collect.Agent{Kind: collect.KindInteractive, Tool: tool, PaneTitle: title}
+	}
+	cases := []struct {
+		name  string
+		agent *collect.Agent
+		want  string
+	}{
+		{"omp strips prefix", interactive("omp", "π: fix dropdown"), "fix dropdown"},
+		{"claude idle glyph", interactive("claude", "✳ 학생 개별 수강료 팝업창 개선"), "학생 개별 수강료 팝업창 개선"},
+		{"claude spinner glyph", interactive("claude", "⠐ build the API docs"), "build the API docs"},
+		{"claude bare title", interactive("claude", "plain title"), "plain title"},
+		{"claude glyph only", interactive("claude", "✳"), ""},
+		{"other tool", interactive("codex", "some task"), ""},
+		{"empty title", interactive("claude", "  "), ""},
+		{"background claude", &collect.Agent{Kind: collect.KindBackground, Tool: "claude", PaneTitle: "✳ task"}, ""},
+		{"nil agent", nil, ""},
+	}
+	for _, tc := range cases {
+		if got := noteSuggestion(tc.agent); got != tc.want {
+			t.Errorf("%s: noteSuggestion = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestFirstInteractiveClaudeNoteOffersStrippedTitleAsPrefill mirrors the OMP
+// flow for a Claude Code pane: the first note offers the pane title with its
+// status glyph removed.
+func TestFirstInteractiveClaudeNoteOffersStrippedTitleAsPrefill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	cl := collect.Agent{
+		ID: "claude-pane", Kind: collect.KindInteractive, Tool: "claude",
+		Life: collect.LifeWorking, Project: "/p", Name: "claude-pane",
+		PaneTitle: "✳ 윈도우 타이틀에 메모 기능 추가",
+	}
+	m := Model{snap: projSnap(cl), notesStore: notes.Load(), width: 200}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if !m.suggestingNote || m.naming {
+		t.Fatalf("first Claude note should ask before editing: suggesting=%v naming=%v", m.suggestingNote, m.naming)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = next.(Model)
+	if m.suggestingNote || !m.naming {
+		t.Fatalf("y should open the note editor: suggesting=%v naming=%v", m.suggestingNote, m.naming)
+	}
+	if got, want := m.noteInput, "윈도우 타이틀에 메모 기능 추가"; got != want {
+		t.Errorf("suggested note = %q, want %q", got, want)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got, want := next.(Model).notesStore.Get("claude-pane"), "윈도우 타이틀에 메모 기능 추가"; got != want {
+		t.Errorf("saved suggested note = %q, want %q", got, want)
+	}
+}
+
 func TestFirstInteractiveOMPNoteOffersTitleAsPrefill(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")

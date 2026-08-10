@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -61,8 +62,8 @@ type Model struct {
 	hideDetail      bool            // hide the detail pane so the list fills the viewport
 	preferencesPath string
 	notesStore      *notes.Store
-	suggestingNote  bool   // asking whether to prefill a first OMP note from its tmux title
-	suggestedNote   string // OMP task title offered as the note prefill
+	suggestingNote  bool   // asking whether to prefill a first note from the pane's tmux title
+	suggestedNote   string // pane-title task offered as the note prefill
 	suggestedNoteID string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
 	naming          bool   // capturing a note for the selected agent
 	namingAgentID   string // agent that owns the in-progress note
@@ -237,15 +238,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func ompNoteSuggestion(a *collect.Agent) string {
-	if a == nil || a.Kind != collect.KindInteractive || a.Tool != "omp" {
+// noteSuggestion returns a prefill for a first note on an interactive pane
+// whose tool titles the pane after its current task: omp sets "π: <task>" and
+// Claude Code sets "<spinner glyph> <task>". Other tools and empty titles
+// yield no suggestion.
+func noteSuggestion(a *collect.Agent) string {
+	if a == nil || a.Kind != collect.KindInteractive {
 		return ""
 	}
 	title := strings.TrimSpace(a.PaneTitle)
 	if title == "" {
 		return ""
 	}
-	return strings.TrimSpace(strings.TrimPrefix(title, "π:"))
+	switch a.Tool {
+	case "omp":
+		return strings.TrimSpace(strings.TrimPrefix(title, "π:"))
+	case "claude":
+		// The leading glyph is a spinner frame ("✳", "⠐", "·", ...) that
+		// varies by state and version, so strip any run of symbols and
+		// punctuation rather than matching specific characters.
+		return strings.TrimSpace(strings.TrimLeftFunc(title, func(r rune) bool {
+			return unicode.IsSymbol(r) || unicode.IsPunct(r) || unicode.IsSpace(r)
+		}))
+	}
+	return ""
 }
 
 func (m *Model) clearNoteSuggestion() {
@@ -267,9 +283,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// A first OMP note can be prefilled from its tmux title (for example,
-	// "π: fix student-search dropdown"). y or enter accepts the suggestion, n
-	// opens a blank editor, and esc cancels the note request.
+	// A first note on an omp or Claude pane can be prefilled from its tmux
+	// title (for example, "π: fix student-search dropdown"). y or enter
+	// accepts the suggestion, n opens a blank editor, and esc cancels the
+	// note request.
 	if m.suggestingNote {
 		a := m.selectedAgent()
 		if a == nil || a.ID != m.suggestedNoteID {
@@ -382,7 +399,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a := m.selectedAgent(); a != nil {
 			m.noteInput = m.notesStore.Get(a.ID)
 			if m.noteInput == "" {
-				if suggestion := ompNoteSuggestion(a); suggestion != "" {
+				if suggestion := noteSuggestion(a); suggestion != "" {
 					m.suggestingNote = true
 					m.suggestedNote = suggestion
 					m.suggestedNoteID = a.ID
