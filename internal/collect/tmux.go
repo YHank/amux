@@ -119,9 +119,17 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 	return agents, nil
 }
 
-// capturePane returns the last n lines of a pane's actual terminal content,
-// right-trimmed, with the pane's own ANSI color/style codes preserved (-e) so
-// the live preview shows real colors instead of flat text. Best-effort: a
+// capturePane returns a pane's actual terminal content ending at the bottom of
+// the visible screen, right-trimmed, with the pane's own ANSI color/style codes
+// preserved (-e) so the live preview shows real colors instead of flat text.
+//
+// Note that n is NOT the number of lines returned. "-S -n" sets the start of
+// the capture range n lines up into the scrollback; with no "-E" the range runs
+// to the bottom of the visible screen, so the result is n scrollback lines plus
+// the whole screen — typically well over n lines. Callers that want a bounded
+// window must slice the tail themselves (see contentSpinnerScanLines and
+// choicePromptScanLines), and must budget for multi-line status bars sitting
+// between the real signal and the last line. Best-effort: a
 // capture failure (pane closed mid-scan, etc.) yields nil rather than an
 // error, since a missing preview shouldn't drop the whole agent from the
 // snapshot.
@@ -187,15 +195,44 @@ func looksLikeChoicePrompt(tool string, lines []string) bool {
 	return false
 }
 
-// interactiveLife distinguishes an AI-tool pane that is actively generating
-// from one that's alive but idle (waiting on the user).
+// isSpinnerGlyph reports whether r is a character these tools use exclusively
+// for animated "working" indicators, never for real text.
 //
-// isSpinnerGlyph reports whether r is one of the Braille Pattern characters
-// (U+2800–U+28FF), a block Claude Code and Oh My Pi use exclusively for
-// animated spinners, never for real text — verified live in both this pane
-// title (Claude Code) and pane body content (Oh My Pi).
+// The set is deliberately a union across tool versions, because the glyphs are
+// NOT stable: Claude Code shipped a Braille spinner in older builds and moved
+// to half-circle frames by 2.1.228. Matching only one family silently reports
+// every busy pane as idle after an upgrade, so new families are added here
+// rather than swapped in. Sources:
+//
+//   - U+2800–U+28FF (Braille) — older Claude Code pane titles, and Oh My Pi
+//     pane body lines; both verified live.
+//   - U+25D0–U+25D3 (◐◓◑◒) — Claude Code 2.1.228 pane titles, shown only while
+//     the agent is actually generating. Confirmed two ways: the frame arrays
+//     extracted straight out of the installed binary
+//     (~/.local/share/claude/versions/2.1.228) are ["◐","◑"] and
+//     ["◐","◓","◑","◒"], and live panes carrying these glyphs were the only
+//     ones with an active token counter in the body.
+// DO NOT add the star family (✳ U+2733, ✶ U+2736, ✻ U+273B, ✽ U+273D,
+// ✢ U+2722) here. Claude Code 2.1.228 puts ✳ at the front of the pane title
+// while the agent sits at an empty prompt — it is an IDLE marker, the exact
+// opposite of a spinner. Accepting it reported every waiting pane as working.
+// Verified live by cross-checking titles against pane bodies: every ✳ pane
+// showed a bare "❯" prompt with no token counter, while ◐/◑ panes showed an
+// active counter ("↓ 12.9k"); two panes were observed flipping ◐/◑ → ✳ as
+// their task finished. The same star glyphs DO appear in Claude Code's in-body
+// status line while working ("✶ Wibbling… (2m 32s · ↓ 10.2k tokens)"), so the
+// family is ambiguous across positions and is not a safe signal anywhere.
+// Claude Code panes are already covered by the title check.
+//
+// Also excluded for the same reason: '·' (U+00B7) and '∗' (U+2217).
 func isSpinnerGlyph(r rune) bool {
-	return r >= 0x2800 && r <= 0x28FF
+	switch {
+	case r >= 0x2800 && r <= 0x28FF:
+		return true
+	case r >= 0x25D0 && r <= 0x25D3:
+		return true
+	}
+	return false
 }
 
 // interactiveLife distinguishes an AI-tool pane that is actively generating
@@ -203,8 +240,10 @@ func isSpinnerGlyph(r rune) bool {
 // title alone.
 //
 // Claude Code writes a spinner glyph as the first character of the pane
-// title while working (e.g. "⠂ my task") and drops it when idle ("claude
-// agents"). Oh My Pi does NOT: its title is a static "π: <task>" whether
+// title while working (e.g. "◑ my task", or "⠂ my task" on older builds) and
+// drops it when idle ("claude agents"). Which glyph family it uses varies by
+// version — see isSpinnerGlyph. Oh My Pi does NOT: its title is a static
+// "π: <task>" whether
 // working or idle — verified live by capturing the same omp pane both mid-task
 // and at rest, both showing the identical title shape. So this alone
 // correctly detects Claude Code but always reads Idle for omp; omp's own
@@ -224,6 +263,11 @@ func interactiveLife(title string) Lifecycle {
 // for an in-body spinner, for the same reason choicePromptScanLines is
 // bounded: a genuine live spinner is always near the current bottom of
 // screen, not buried in scrollback.
+//
+// It stays tight because the tools that need it — omp and OpenCode — render
+// their spinner just above a one or two line input box, with no tall status
+// bar in between. Claude Code, whose custom statuslines are what would justify
+// a wider window, is detected from its pane title instead.
 const contentSpinnerScanLines = 10
 
 // contentShowsSpinner reports whether the trailing pane content contains a

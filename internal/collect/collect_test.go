@@ -122,6 +122,16 @@ func TestInteractiveLife(t *testing.T) {
 	}{
 		{"⠂ tmux agent monitor tui", LifeWorking}, // Braille spinner (U+2802) — actively generating
 		{"⠐ claude", LifeWorking},
+		// Claude Code 2.1.228 titles, captured live. The ◐/◑ panes were the
+		// ones with an active token counter in the body; they regressed to
+		// LifeIdle when only Braille counted as a spinner.
+		{"◑ Investigate running agent showing idle state", LifeWorking},
+		{"◐ Claude Code", LifeWorking},
+		// ✳ leads the title of a Claude Code pane sitting at an empty prompt.
+		// It looks spinner-adjacent but means the opposite; the panes below
+		// were all verified idle from their bodies.
+		{"✳ 학생 상담 및 분석용 API 8개 제작", LifeIdle},
+		{"✳ Claude Code", LifeIdle},
 		{"claude agents", LifeIdle},       // no spinner — at a menu/idle
 		{"π: tmux_agent_check", LifeIdle}, // omp idle title, no spinner
 		{"", LifeIdle},                    // no title at all
@@ -303,6 +313,44 @@ func TestContentShowsSpinner(t *testing.T) {
 		t.Error("OpenCode footer must not mark a Claude pane as working")
 	}
 
+	// Real Claude Code 2.1.228 fixture captured live mid-task. Its in-body
+	// status line leads with a star glyph — deliberately NOT detected, because
+	// the same family marks an idle pane title (see isSpinnerGlyph). Claude
+	// Code is covered by interactiveLife's title check instead, so a false
+	// negative here costs nothing while a false positive would mark every
+	// waiting agent as busy.
+	claudeWorking := []string{
+		"⏺ Update(admin/html/subpage/todayStatus/tools/tools.js)",
+		"⎿  Added 2 lines, removed 7 lines",
+		"Tools.js 잔여 ban_seq 파라미터 확인",
+		"✶ Wibbling… (2m 32s · ↓ 10.2k tokens)",
+		"⎿  Tip: You can control how big a workflow is just by prompting.",
+		"──────────────────────────────────────",
+		"❯",
+		"──────────────────────────────────────",
+		"branch:feat/yhank/today_status (wt:english_kangan) | !5 ?2",
+		"[OMC#4.15.7] | Model: Opus 5 | 5h:[--------]5%(4h45m) wk:[#-------]13%",
+		"40%(400k) | Opus 5 (1M context) | feat/yhank/today_status | v2.1.228",
+		"⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent",
+	}
+	if contentShowsSpinner("claude", claudeWorking) {
+		t.Error("Claude Code's star status line must not be treated as a body spinner")
+	}
+
+	// The bare input box on its own is idle, not working: none of the box
+	// drawing or mode-indicator glyphs may count as a spinner.
+	claudeIdle := []string{
+		"⏺ Done — 3 files changed.",
+		"──────────────────────────────────────",
+		"❯",
+		"──────────────────────────────────────",
+		"branch:feat/yhank/today_status (wt:english_kangan) | !5 ?2",
+		"⏵⏵ auto mode on (shift+tab to cycle)",
+	}
+	if contentShowsSpinner("claude", claudeIdle) {
+		t.Error("idle Claude Code content must not be detected as working")
+	}
+
 	// Real omp idle fixture: static "π: <task>" title context, no spinner
 	// anywhere in the body — verified against the same tool's idle output.
 	idle := []string{
@@ -351,12 +399,19 @@ func TestContentShowsSpinner(t *testing.T) {
 }
 
 func TestIsSpinnerGlyph(t *testing.T) {
-	for _, r := range []rune{'⠂', '⠐', '⠸', '⠦'} {
+	spinners := []rune{
+		'⠂', '⠐', '⠸', '⠦', // Braille — older Claude Code titles, omp body lines
+		'◐', '◑', '◒', '◓', // half circles — Claude Code 2.1.228 working titles
+	}
+	for _, r := range spinners {
 		if !isSpinnerGlyph(r) {
 			t.Errorf("%q (U+%04X) should be a spinner glyph", r, r)
 		}
 	}
-	for _, r := range []rune{'a', '가', '✻', '✽', 'π', ' '} {
+	// The star family must stay out: Claude Code 2.1.228 leads an *idle* pane
+	// title with ✳, so treating stars as spinners marked every waiting agent as
+	// working. '·' and '∗' are ordinary punctuation for the same reason.
+	for _, r := range []rune{'a', '가', 'π', ' ', '✳', '✶', '✻', '✽', '✢', '·', '∗', '●', '○'} {
 		if isSpinnerGlyph(r) {
 			t.Errorf("%q (U+%04X) should not be a spinner glyph", r, r)
 		}
