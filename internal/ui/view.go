@@ -420,7 +420,7 @@ func agentMeta(a *collect.Agent, now time.Time) string {
 	if a.Kind == collect.KindInteractive && a.CPU >= 0.1 {
 		parts = append(parts, fmt.Sprintf("%.0f%%cpu", a.CPU))
 	}
-	if age := a.Age(now); age > 0 && !a.UpdatedAt.IsZero() {
+	if age := a.Age(now); age > 0 {
 		parts = append(parts, humanDuration(age))
 	}
 	return strings.Join(parts, " · ")
@@ -467,8 +467,8 @@ func (m Model) renderDetail(w, h int) string {
 			kv("tokens", humanTokens(a.Tokens))
 		}
 	}
-	if !a.UpdatedAt.IsZero() {
-		kv("updated", humanDuration(a.Age(now))+" ago")
+	if age := a.Age(now); age > 0 {
+		kv("updated", humanDuration(age)+" ago")
 	}
 
 	if a.Kind == collect.KindInteractive {

@@ -188,9 +188,46 @@ func TestFlatViewUsesProcessStartWhenStatusChangesTie(t *testing.T) {
 	}
 }
 
+func TestInitialFlatOrderingUsesFrozenCPU(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	low := collect.Agent{ID: "low", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking, CPU: 5}
+	high := collect.Agent{ID: "high", Kind: collect.KindInteractive, PID: 102, Life: collect.LifeWorking, CPU: 20}
+	m := Model{}
+	next := projSnap(low, high)
+	next.Taken = now
+	m.recordStatusChangeTimes(&next)
+	m.snap = next
+
+	next = projSnap(low, high)
+	next.Taken = now.Add(time.Minute)
+	m.recordStatusChangeTimes(&next)
+	m.snap = next
+	m.flatView = true
+	m.rebuildRows()
+	if !m.initialCPUSeeded {
+		t.Fatal("second snapshot did not freeze initial CPU ordering")
+	}
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "high" {
+		t.Errorf("first seeded flat agent = %#v, want higher frozen CPU", got)
+	}
+
+	next = projSnap(
+		collect.Agent{ID: "low", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking, CPU: 30},
+		collect.Agent{ID: "high", Kind: collect.KindInteractive, PID: 102, Life: collect.LifeWorking, CPU: 1},
+	)
+	next.Taken = now.Add(2 * time.Minute)
+	m.recordStatusChangeTimes(&next)
+	m.snap = next
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "high" {
+		t.Errorf("first refreshed flat agent = %#v, want frozen initial CPU order", got)
+	}
+}
+
 func TestKeyboardHelpPopupAndCompactFooter(t *testing.T) {
 	m := Model{width: 100, height: 30}
 	footer := m.renderFooter()
+
 	for _, key := range []string{"j/k move", "? help", "q quit"} {
 		if !strings.Contains(footer, key) {
 			t.Errorf("compact footer = %q, missing %q", footer, key)
@@ -215,6 +252,198 @@ func TestKeyboardHelpPopupAndCompactFooter(t *testing.T) {
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if next.(Model).showHelp {
 		t.Fatal("esc did not close keyboard help")
+	}
+}
+func TestFlatViewUsesDeepestLaunchProjectAsTieBreaker(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	parent := collect.Agent{ID: "parent", Life: collect.LifeWorking, StatusChangedAt: now}
+	current := collect.Agent{ID: "current", Life: collect.LifeWorking, StatusChangedAt: now}
+	m := Model{
+		currentDir: "/workspace/current/nested/subdir",
+		flatView:   true,
+		snap: collect.Snapshot{
+			Projects: []collect.Project{
+				{Key: "/workspace/current", Name: "parent", Agents: []collect.Agent{parent}},
+				{Key: "/workspace/current/nested", Name: "nested", Agents: []collect.Agent{current}},
+			},
+			Agents: []collect.Agent{parent, current},
+		},
+	}
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "current" {
+		t.Errorf("first flat agent = %#v, want deepest launch-project agent", got)
+	}
+}
+
+func TestFlatViewPrioritizesRecencyBeforeLaunchProject(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	newer := collect.Agent{ID: "newer", Life: collect.LifeWorking, StatusChangedAt: now.Add(time.Minute)}
+	current := collect.Agent{ID: "current", Life: collect.LifeWorking, StatusChangedAt: now}
+	m := Model{
+		currentDir: "/workspace/current",
+		flatView:   true,
+		snap: collect.Snapshot{
+			Projects: []collect.Project{
+				{Key: "/workspace/other", Name: "other", Agents: []collect.Agent{newer}},
+				{Key: "/workspace/current", Name: "current", Agents: []collect.Agent{current}},
+			},
+			Agents: []collect.Agent{newer, current},
+		},
+	}
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "newer" {
+		t.Errorf("first flat agent = %#v, want more recent agent", got)
+	}
+}
+
+// A busy agent restamps its activity time on nearly every refresh, so an
+// ordering that ranked activity alongside status changes let ordinary churn
+// outrank the transition the user is actually watching for. Status wins.
+func TestFlatViewStatusChangeOutranksActivity(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	// busy also outranks transitioned on attention, so only the status time can
+	// put transitioned first — the flat view is explicitly a recency list.
+	transitioned := collect.Agent{
+		ID: "transitioned", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/alpha", Name: "transitioned",
+		StatusChangedAt: now, ActivityAt: now.Add(-time.Minute),
+	}
+	busy := collect.Agent{
+		ID: "busy", Kind: collect.KindInteractive, Life: collect.LifeInput,
+		Project: "/beta", Name: "busy",
+		StatusChangedAt: now.Add(-time.Minute), ActivityAt: now,
+	}
+	m := Model{
+		flatView: true,
+		snap: collect.Snapshot{
+			Projects: []collect.Project{
+				{Key: "/beta", Name: "beta", Agents: []collect.Agent{busy}},
+				{Key: "/alpha", Name: "alpha", Agents: []collect.Agent{transitioned}},
+			},
+			Agents: []collect.Agent{busy, transitioned},
+		},
+	}
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "transitioned" {
+		t.Errorf("first flat agent = %#v, want the agent whose status just changed", got)
+	}
+}
+
+// Activity still orders agents that changed state at the same instant, which
+// is every agent present when a single refresh stamps them all at once.
+func TestFlatViewUsesActivityWhenStatusChangesTie(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	stale := collect.Agent{
+		ID: "stale", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/alpha", Name: "stale", StatusChangedAt: now, ActivityAt: now.Add(-time.Hour),
+	}
+	fresh := collect.Agent{
+		ID: "fresh", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/beta", Name: "fresh", StatusChangedAt: now, ActivityAt: now,
+	}
+	m := Model{
+		flatView: true,
+		snap: collect.Snapshot{
+			Projects: []collect.Project{
+				{Key: "/alpha", Name: "alpha", Agents: []collect.Agent{stale}},
+				{Key: "/beta", Name: "beta", Agents: []collect.Agent{fresh}},
+			},
+			Agents: []collect.Agent{stale, fresh},
+		},
+	}
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "fresh" {
+		t.Errorf("first flat agent = %#v, want the more recently active pane", got)
+	}
+}
+
+// A working background job rewrites its state file as its token count climbs,
+// bumping UpdatedAt without changing state. That write must not outrank an
+// agent that genuinely transitioned, or background churn buries exactly the
+// transitions the flat view exists to surface.
+func TestBackgroundStateFileWritesDoNotOutrankTransitions(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	churning := collect.Agent{
+		ID: "churning", Kind: collect.KindBackground, Life: collect.LifeWorking,
+		Project: "/alpha", Name: "churning",
+		StatusChangedAt: now.Add(-time.Hour), UpdatedAt: now,
+	}
+	transitioned := collect.Agent{
+		ID: "transitioned", Kind: collect.KindInteractive, Life: collect.LifeIdle,
+		Project: "/beta", Name: "transitioned", StatusChangedAt: now.Add(-time.Minute),
+	}
+	m := Model{
+		flatView: true,
+		snap: collect.Snapshot{
+			Projects: []collect.Project{
+				{Key: "/alpha", Name: "alpha", Agents: []collect.Agent{churning}},
+				{Key: "/beta", Name: "beta", Agents: []collect.Agent{transitioned}},
+			},
+			Agents: []collect.Agent{churning, transitioned},
+		},
+	}
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "transitioned" {
+		t.Errorf("first flat agent = %#v, want the agent whose status changed", got)
+	}
+
+	// The file timestamp still breaks ties one tier down, so background
+	// progress orders backgrounds against each other.
+	quiet := collect.Agent{
+		ID: "quiet", Kind: collect.KindBackground, Life: collect.LifeWorking,
+		Project: "/gamma", Name: "quiet",
+		StatusChangedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
+	m.snap.Projects[1] = collect.Project{Key: "/gamma", Name: "gamma", Agents: []collect.Agent{quiet}}
+	m.snap.Agents = []collect.Agent{churning, quiet}
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "churning" {
+		t.Errorf("first flat agent = %#v, want the background job still writing", got)
+	}
+}
+
+// Interactive agents never carry UpdatedAt — it only exists for background
+// state files — so ranking project headers on it alone tied every tmux-only
+// project at the zero time and fell through to alphabetical order. A pane
+// changing state has to lift its project too, not just its own row.
+func TestGroupedProjectsFollowLatestStatusChange(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	older := collect.Agent{
+		ID: "older", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/alpha", Name: "older", StatusChangedAt: now.Add(-time.Minute),
+	}
+	newer := collect.Agent{
+		ID: "newer", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/zeta", Name: "newer", StatusChangedAt: now,
+	}
+	m := Model{
+		snap: collect.Snapshot{
+			Projects: []collect.Project{
+				{Key: "/alpha", Name: "alpha", Agents: []collect.Agent{older}},
+				{Key: "/zeta", Name: "zeta", Agents: []collect.Agent{newer}},
+			},
+			Agents: []collect.Agent{older, newer},
+		},
+	}
+	m.rebuildRows()
+	if m.rows[0].kind != rowHeader || m.rows[0].project.Key != "/zeta" {
+		t.Errorf("first project header = %#v, want the project whose agent just changed", m.rows[0])
+	}
+}
+
+// The age column was blank for every tmux row, because Agent.Age keyed off the
+// background-only UpdatedAt field.
+func TestInteractiveRowShowsTimeSinceStatusChange(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	a := &collect.Agent{
+		ID: "%1", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		StatusChangedAt: now.Add(-90 * time.Second),
+	}
+	if got := agentMeta(a, now); !strings.Contains(got, "1m") {
+		t.Errorf("interactive row meta = %q, want an age since the status change", got)
+	}
+	if got := agentMeta(&collect.Agent{ID: "%2", Kind: collect.KindInteractive}, now); got != "" {
+		t.Errorf("meta for an agent with no observed transition = %q, want empty", got)
 	}
 }
 
@@ -577,35 +806,51 @@ func TestStatusTransitionTimeResetsForReplacementInteractiveProcess(t *testing.T
 	}
 }
 
-func TestInteractiveContentChangeRefreshesFlatActivityOrder(t *testing.T) {
+func TestInteractivePreviewChangeRefreshesFlatActivityOrder(t *testing.T) {
 	first := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
 	second := first.Add(time.Minute)
+	third := second.Add(time.Minute)
 	active := collect.Agent{
 		ID: "active", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
-		StatusChangedAt: first, ActivityAt: first, PaneTitle: "old task", Preview: []string{"old output"},
-		Project: "/p", Name: "active",
+		StatusChangedAt: first, ActivityAt: first, PaneTitle: "π: static task",
+		Preview: []string{"old output"}, PreviewFingerprint: "old output", Project: "/p", Name: "active",
 	}
 	other := collect.Agent{
 		ID: "other", Kind: collect.KindInteractive, PID: 102, Life: collect.LifeWorking,
-		StatusChangedAt: first, ActivityAt: first, PaneTitle: "other task", Preview: []string{"stable output"},
-		Project: "/p", Name: "other",
+		StatusChangedAt: first, ActivityAt: first, PaneTitle: "other task",
+		Preview: []string{"stable output"}, PreviewFingerprint: "stable output", Project: "/p", Name: "other",
 	}
 	m := Model{snap: projSnap(active, other)}
 	next := projSnap(
 		collect.Agent{
 			ID: "active", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
-			PaneTitle: "new task", Preview: []string{"new output"}, Project: "/p", Name: "active",
+			PaneTitle: "π: static task", Preview: []string{"new output"}, PreviewFingerprint: "new output",
+			Project: "/p", Name: "active",
 		},
 		other,
 	)
 	next.Taken = second
 
 	m.recordStatusChangeTimes(&next)
-	if got := next.Agents[0].ActivityAt; !got.Equal(second) {
-		t.Errorf("activity timestamp = %v, want %v", got, second)
+	if got := next.Agents[0].ActivityAt; !got.Equal(first) {
+		t.Errorf("unconfirmed preview activity = %v, want %v", got, first)
 	}
-	if got := next.Projects[0].Agents[0].ActivityAt; !got.Equal(second) {
-		t.Errorf("project activity timestamp = %v, want %v", got, second)
+	m.snap = next
+	next = projSnap(
+		collect.Agent{
+			ID: "active", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+			PaneTitle: "π: static task", Preview: []string{"new output"}, PreviewFingerprint: "new output",
+			Project: "/p", Name: "active",
+		},
+		other,
+	)
+	next.Taken = third
+	m.recordStatusChangeTimes(&next)
+	if got := next.Agents[0].ActivityAt; !got.Equal(third) {
+		t.Errorf("confirmed preview activity = %v, want %v", got, third)
+	}
+	if got := next.Projects[0].Agents[0].ActivityAt; !got.Equal(third) {
+		t.Errorf("project preview activity = %v, want %v", got, third)
 	}
 	if got := next.Agents[0].StatusChangedAt; !got.Equal(first) {
 		t.Errorf("status timestamp = %v, want unchanged %v", got, first)
@@ -633,6 +878,84 @@ func TestMissingPanePreviewDoesNotCountAsActivity(t *testing.T) {
 	current.Preview = []string{"output"}
 	if interactiveActivityChanged(prior, current) {
 		t.Fatal("recovered preview counted as pane activity")
+	}
+}
+
+func TestMissingPreviewPreservesPendingActivityCandidate(t *testing.T) {
+	first := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	changed := first.Add(time.Minute)
+	recovered := changed.Add(2 * time.Minute)
+	prior := collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		StatusChangedAt: first, ActivityAt: first, PaneTitle: "static task",
+		Preview: []string{"old"}, PreviewFingerprint: "old", Project: "/p",
+	}
+	m := Model{snap: projSnap(prior)}
+	next := projSnap(collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		PaneTitle: "static task", Preview: []string{"new"}, PreviewFingerprint: "new", Project: "/p",
+	})
+	next.Taken = changed
+	m.recordStatusChangeTimes(&next)
+	m.snap = next
+
+	next = projSnap(collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		PaneTitle: "static task", Preview: nil, Project: "/p",
+	})
+	next.Taken = changed.Add(time.Minute)
+	m.recordStatusChangeTimes(&next)
+	m.snap = next
+
+	next = projSnap(collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		PaneTitle: "static task", Preview: []string{"new"}, PreviewFingerprint: "new", Project: "/p",
+	})
+	next.Taken = recovered
+	m.recordStatusChangeTimes(&next)
+	if got := next.Agents[0].ActivityAt; !got.Equal(recovered) {
+		t.Errorf("recovered preview activity = %v, want %v", got, recovered)
+	}
+}
+
+func TestMissingPreviewDoesNotPromoteAcceptedFingerprint(t *testing.T) {
+	first := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	prior := collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		PaneTitle: "static task", Preview: []string{"stable"}, PreviewFingerprint: "stable", Project: "/p",
+	}
+	m := Model{}
+	next := projSnap(prior)
+	next.Taken = first
+	m.recordStatusChangeTimes(&next)
+	m.snap = next
+
+	next = projSnap(collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		PaneTitle: "static task", Preview: nil, Project: "/p",
+	})
+	next.Taken = first.Add(time.Minute)
+	m.recordStatusChangeTimes(&next)
+	m.snap = next
+
+	next = projSnap(prior)
+	next.Taken = first.Add(2 * time.Minute)
+	m.recordStatusChangeTimes(&next)
+	if got := next.Agents[0].ActivityAt; !got.Equal(first) {
+		t.Errorf("unchanged recovered preview activity = %v, want %v", got, first)
+	}
+}
+
+func TestSpinnerOnlyTitleChangeDoesNotCountAsActivity(t *testing.T) {
+	prior := collect.Agent{
+		Kind: collect.KindInteractive, PaneTitle: "π ⠦ static task", Detail: "π ⠦ static task",
+		Preview: []string{"stable output"}, PreviewFingerprint: "stable output",
+	}
+	current := prior
+	current.PaneTitle = "π ⠧ static task"
+	current.Detail = "π ⠧ static task"
+	if interactiveActivityChanged(prior, current) {
+		t.Fatal("spinner-only title change counted as pane activity")
 	}
 }
 
@@ -991,7 +1314,11 @@ func TestNoteSuggestionByTool(t *testing.T) {
 		agent *collect.Agent
 		want  string
 	}{
-		{"omp strips prefix", interactive("omp", "π: fix dropdown"), "fix dropdown"},
+		{"omp strips colon prefix", interactive("omp", "π: fix dropdown"), "fix dropdown"},
+		// Live omp titles use "π > <task>"; the older "π: <task>" form above
+		// still ships, so both have to survive the same strip.
+		{"omp strips arrow prefix", interactive("omp", "π > Improve activity sorting"), "Improve activity sorting"},
+		{"omp glyph only", interactive("omp", "π >"), ""},
 		{"claude idle glyph", interactive("claude", "✳ 학생 개별 수강료 팝업창 개선"), "학생 개별 수강료 팝업창 개선"},
 		{"claude spinner glyph", interactive("claude", "⠐ build the API docs"), "build the API docs"},
 		{"claude bare title", interactive("claude", "plain title"), "plain title"},

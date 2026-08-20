@@ -57,6 +57,11 @@ working right now, what's waiting on you, and what's done — grouped by project
   an agent that has asked a question (including Claude Code AskUserQuestion and
   OpenCode question prompts) and is blocked on your choice, detected from the
   pane's actual content rather than guessed from its title.
+- **Working vs. idle, read from the pane** — Claude Code 2.1.237 leaves its
+  `✳ <task>` title in place long after a turn ends, so amux reads the live
+  status row in the pane body (`Doodling… (3m 29s · ↓ 9.7k tokens)`) instead;
+  omp and OpenCode get the same content-based treatment. Older Claude Code
+  builds that spin their title still work unchanged.
 - **Live preview, in color** — the detail panel shows the selected agent's
   real terminal output with its own colors intact, refreshed every cycle,
   mux-style — not just a flat one-line status.
@@ -67,10 +72,16 @@ working right now, what's waiting on you, and what's done — grouped by project
 - **Kill or dismiss** — press `x` on an interactive agent, then `y`, to end
   its tmux pane. Press `x` on a live headless agent to remove it from the
   current amux dashboard session without touching its daemon.
-- **Attention-first ordering** — projects and agents sort by required human
-  action: input, error, stale/unknown, working, idle, then stopped/done.
-  New errors remain visible until acknowledged with `a`; acknowledged errors
-  and completed/stopped agents fold into history (`d` reveals them).
+- **Attention-first ordering** — grouped view sorts projects and agents by
+  required human action: input, error, stale/unknown, working, idle, then
+  stopped/done. New errors remain visible until acknowledged with `a`;
+  acknowledged errors and completed/stopped agents fold into history
+  (`d` reveals them).
+- **The agent that just changed is on top** — a lifecycle change is the
+  primary sort key in both views, so the moment an agent starts working,
+  finishes, or asks you a question it jumps to the first row and stays there
+  until something else changes. Busy panes redraw constantly; that churn only
+  breaks ties, it never outranks a real transition.
 - **Your own notes, local to amux** — press `i` to jot a short note on any
   agent (why it's running, what you're waiting on); saved to disk, shown in
   the list and detail panel, never written back to tmux/Claude/omp. For a
@@ -133,10 +144,10 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `c` | Compose a message and send it into an interactive agent's pane |
 | `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
 | `/` | Filter by tool, name, project, model, path, status detail, or saved note |
-| `i` | Add / edit a note; for a first interactive OMP or Claude note, choose whether to prefill its tmux task title |
+| `i` | Add / edit a note; for a first interactive OMP or Claude note, choose whether to prefill its tmux task title (leading `π:` / `π >` / spinner glyph stripped) |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
 | `d` | Show / hide completed, stopped, and acknowledged-error history |
-| `p` | Toggle project-grouped and flat project-prefixed views; latest status changes sort first in the flat view |
+| `p` | Toggle project-grouped and flat project-prefixed views; both put the latest status change first, and the flat view is a pure recency list |
 | `r` | Refresh now |
 | `v` | Toggle the list/detail panes between side-by-side and top/bottom layouts |
 | `m` | Show / hide the detail and terminal-preview pane |

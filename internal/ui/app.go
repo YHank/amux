@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -52,29 +53,36 @@ type Model struct {
 	sel     int   // index into selectable agent rows
 	selRows []int // indices into rows that are selectable (agents)
 
-	filter           string
-	filtering        bool
-	showDone         bool            // reveal completed, stopped, and dismissed agents
-	flatView         bool            // show a single project-prefixed list instead of grouped project sections
-	flatProjectWidth int             // display width of the longest visible flat-view project name
-	hidden           int             // count of agents hidden by the current view
-	acknowledged     map[string]bool // session-local error acknowledgements by agent ID
-	dismissed        map[string]bool // session-local background dismissals by agent ID
-	stacked          bool            // render the agent list above the detail pane
-	hideDetail       bool            // hide the detail pane so the list fills the viewport
-	preferencesPath  string
-	notesStore       *notes.Store
-	suggestingNote   bool   // asking whether to prefill a first note from the pane's tmux title
-	suggestedNote    string // pane-title task offered as the note prefill
-	suggestedNoteID  string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
-	naming           bool   // capturing a note for the selected agent
-	namingAgentID    string // agent that owns the in-progress note
-	noteInput        string
-	composing        bool // capturing a message to send into the selected agent's pane
-	composeInput     string
-	showHelp         bool   // show the keyboard-shortcuts popup
-	helpOffset       int    // first visible keyboard-help entry
-	notice           string // brief, self-clearing status line (e.g. "sent to <pane>")
+	filter                 string
+	filtering              bool
+	showDone               bool            // reveal completed, stopped, and dismissed agents
+	flatView               bool            // show a single project-prefixed list instead of grouped project sections
+	flatProjectWidth       int             // display width of the longest visible flat-view project name
+	hidden                 int             // count of agents hidden by the current view
+	acknowledged           map[string]bool // session-local error acknowledgements by agent ID
+	dismissed              map[string]bool // session-local background dismissals by agent ID
+	stacked                bool            // render the agent list above the detail pane
+	hideDetail             bool            // hide the detail pane so the list fills the viewport
+	currentDir             string          // launch directory; its project stays first in the flat view
+	currentProjectKey      string          // deepest visible project containing currentDir
+	preferencesPath        string
+	notesStore             *notes.Store
+	suggestingNote         bool   // asking whether to prefill a first note from the pane's tmux title
+	suggestedNote          string // pane-title task offered as the note prefill
+	suggestedNoteID        string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
+	naming                 bool   // capturing a note for the selected agent
+	namingAgentID          string // agent that owns the in-progress note
+	noteInput              string
+	composing              bool // capturing a message to send into the selected agent's pane
+	composeInput           string
+	showHelp               bool // show the keyboard-shortcuts popup
+	helpOffset             int  // first visible keyboard-help entry
+	initialRecencyAt       time.Time
+	initialCPU             map[string]float64 // frozen post-startup CPU tie-breakers
+	initialCPUSeeded       bool
+	previewCandidates      map[string]string // one-refresh debounce for pane output changes
+	lastPreviewFingerprint map[string]string // most recent valid pane-output fingerprint
+	notice                 string            // brief, self-clearing status line (e.g. "sent to <pane>")
 
 	confirmingKill bool // "kill <pane>? y to confirm" — any other key cancels
 	killTarget     string
@@ -94,11 +102,13 @@ type Model struct {
 func New() Model {
 	path := defaultPreferencesPath()
 	prefs := loadViewPreferences(path)
+	currentDir, _ := os.Getwd()
 	return Model{
 		loading:          true,
 		notesStore:       notes.Load(),
 		lastNotesRefresh: time.Now(),
 		preferencesPath:  path,
+		currentDir:       currentDir,
 		stacked:          prefs.Stacked,
 		hideDetail:       prefs.HideDetail,
 		flatView:         prefs.FlatView,
@@ -258,15 +268,12 @@ func noteSuggestion(a *collect.Agent) string {
 		return ""
 	}
 	switch a.Tool {
-	case "omp":
-		return strings.TrimSpace(strings.TrimPrefix(title, "π:"))
-	case "claude":
-		// The leading glyph is a spinner frame ("✳", "⠐", "·", ...) that
-		// varies by state and version, so strip any run of symbols and
-		// punctuation rather than matching specific characters.
-		return strings.TrimSpace(strings.TrimLeftFunc(title, func(r rune) bool {
-			return unicode.IsSymbol(r) || unicode.IsPunct(r) || unicode.IsSpace(r)
-		}))
+	case "omp", "claude":
+		// Both leading markers vary by version and state — omp has shipped
+		// both "π: <task>" and "π > <task>", and Claude Code's glyph is a
+		// spinner or star frame ("✳", "◑", "⠐", "·", ...). Strip the run of
+		// symbols and punctuation rather than matching specific characters.
+		return activityText(title)
 	}
 	return ""
 }
@@ -496,12 +503,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // recordStatusChangeTimes carries the last observed lifecycle transition across
 // refreshes. Collect is intentionally stateless because interactive lifecycle
 // comes from the current pane contents, so the dashboard owns this comparison.
-func (m Model) recordStatusChangeTimes(next *collect.Snapshot) {
+func (m *Model) recordStatusChangeTimes(next *collect.Snapshot) {
+	initialSnapshot := len(m.snap.Agents) == 0
+	seedInitialCPU := !initialSnapshot && !m.initialCPUSeeded
+	if initialSnapshot {
+		m.initialRecencyAt = next.Taken
+		m.initialCPU = nil
+		m.initialCPUSeeded = false
+	}
+	if seedInitialCPU {
+		m.initialCPU = make(map[string]float64, len(next.Agents))
+	}
 	previous := make(map[string]collect.Agent, len(m.snap.Agents))
 	for _, agent := range m.snap.Agents {
 		previous[agent.ID] = agent
 	}
-
 	statusChangedAt := make(map[string]time.Time, len(next.Agents))
 	activityAt := make(map[string]time.Time, len(next.Agents))
 	lifecycle := make(map[string]collect.Lifecycle, len(next.Agents))
@@ -524,7 +540,36 @@ func (m Model) recordStatusChangeTimes(next *collect.Snapshot) {
 			agent.StatusChangedAt = next.Taken
 		}
 		if agent.Kind == collect.KindInteractive {
-			if !sameInstance || prior.ActivityAt.IsZero() || interactiveActivityChanged(prior, *agent) {
+			activityChanged := !sameInstance || prior.ActivityAt.IsZero() || interactiveActivityChanged(prior, *agent)
+			if agent.Preview != nil {
+				if m.lastPreviewFingerprint == nil {
+					m.lastPreviewFingerprint = make(map[string]string)
+				}
+				accepted, known := m.lastPreviewFingerprint[agent.ID]
+				if !known && prior.Preview != nil {
+					accepted, known = prior.PreviewFingerprint, true
+					m.lastPreviewFingerprint[agent.ID] = accepted
+				}
+				switch {
+				case !sameInstance || activityChanged:
+					m.lastPreviewFingerprint[agent.ID] = agent.PreviewFingerprint
+					delete(m.previewCandidates, agent.ID)
+				case !known:
+					m.lastPreviewFingerprint[agent.ID] = agent.PreviewFingerprint
+				case m.previewCandidates[agent.ID] == agent.PreviewFingerprint:
+					activityChanged = true
+					m.lastPreviewFingerprint[agent.ID] = agent.PreviewFingerprint
+					delete(m.previewCandidates, agent.ID)
+				case accepted != agent.PreviewFingerprint:
+					if m.previewCandidates == nil {
+						m.previewCandidates = make(map[string]string)
+					}
+					m.previewCandidates[agent.ID] = agent.PreviewFingerprint
+				default:
+					delete(m.previewCandidates, agent.ID)
+				}
+			}
+			if activityChanged {
 				agent.ActivityAt = next.Taken
 			} else {
 				agent.ActivityAt = prior.ActivityAt
@@ -534,6 +579,12 @@ func (m Model) recordStatusChangeTimes(next *collect.Snapshot) {
 		activityAt[agent.ID] = agent.ActivityAt
 		lifecycle[agent.ID] = agent.Life
 		needsInput[agent.ID] = agent.NeedsInput
+		if seedInitialCPU && agent.Kind == collect.KindInteractive {
+			m.initialCPU[agent.ID] = agent.CPU
+		}
+	}
+	if seedInitialCPU {
+		m.initialCPUSeeded = true
 	}
 
 	for i := range next.Projects {
@@ -560,24 +611,21 @@ func sameAgentInstance(prior, current collect.Agent) bool {
 	return prior.PID != 0 && prior.PID == current.PID
 }
 
+// activityText removes terminal status glyphs that animate independently of a
+// task. Pane titles often begin with a spinner, which must not reorder every
+// working agent on each refresh.
+func activityText(value string) string {
+	return strings.TrimSpace(strings.TrimLeftFunc(value, func(r rune) bool {
+		return r == 'π' || unicode.IsSymbol(r) || unicode.IsPunct(r) || unicode.IsSpace(r)
+	}))
+}
+
 func interactiveActivityChanged(prior, current collect.Agent) bool {
-	if prior.PaneTitle != current.PaneTitle || prior.Detail != current.Detail {
-		return true
-	}
-	// A nil preview is capturePane's failure signal, not pane activity. Do not
-	// promote an idle pane because tmux briefly failed to provide its contents.
-	if prior.Preview == nil || current.Preview == nil {
-		return false
-	}
-	if len(prior.Preview) != len(current.Preview) {
-		return true
-	}
-	for i := range prior.Preview {
-		if prior.Preview[i] != current.Preview[i] {
-			return true
-		}
-	}
-	return false
+	// Pane title/detail changes carry the immediate task-level activity signal.
+	// Preview output is debounced in recordStatusChangeTimes so live counters
+	// cannot reorder agents every refresh.
+	return activityText(prior.PaneTitle) != activityText(current.PaneTitle) ||
+		activityText(prior.Detail) != activityText(current.Detail)
 }
 
 // pruneNotes drops any stored note whose agent isn't in the current snapshot
@@ -715,19 +763,32 @@ func hiddenByDefault(l collect.Lifecycle) bool {
 	return l == collect.LifeDone || l == collect.LifeStopped
 }
 
-func flatActivityTime(a *collect.Agent) time.Time {
+// flatStartTime is the last flat-view fallback: how long the agent has existed
+// at all. Interactive agents carry the observed process start; background ones
+// only have their state file's timestamp.
+func flatStartTime(a *collect.Agent) time.Time {
 	if !a.ProcessStartedAt.IsZero() {
 		return a.ProcessStartedAt
 	}
 	return a.UpdatedAt
 }
 
-func flatRecencyTime(a *collect.Agent) time.Time {
-	latest := a.StatusChangedAt
-	if a.ActivityAt.After(latest) {
-		latest = a.ActivityAt
+// activityRecency is the secondary ordering key: the most recent moment amux
+// saw the agent do something short of a lifecycle change — pane output or a
+// title change for interactive agents, a state-file write for background ones.
+// It deliberately never outranks a status change (see rebuildRows): activity
+// ticks on nearly every refresh of a busy agent, so letting it compete with
+// StatusChangedAt is exactly what buried real transitions in the noise.
+func activityRecency(a *collect.Agent) time.Time {
+	latest := a.ActivityAt
+	if a.UpdatedAt.After(latest) {
+		latest = a.UpdatedAt
 	}
 	return latest
+}
+
+func (m Model) isCurrentProject(p *collect.Project) bool {
+	return p != nil && p.Key == m.currentProjectKey
 }
 
 type visibleProject struct {
@@ -766,8 +827,8 @@ func visibleProjectLatest(agents []*collect.Agent, acknowledged map[string]bool,
 			(a.Life == collect.LifeError && acknowledged[a.ID]) {
 			continue
 		}
-		if a.UpdatedAt.After(latest) {
-			latest = a.UpdatedAt
+		if t := a.Recency(); t.After(latest) {
+			latest = t
 		}
 	}
 	return latest
@@ -789,6 +850,7 @@ func (m *Model) rebuildRows() {
 	m.selRows = m.selRows[:0]
 	m.hidden = 0
 	m.flatProjectWidth = 0
+	m.currentProjectKey = ""
 	f := strings.ToLower(strings.TrimSpace(m.filter))
 	visible := make([]visibleProject, 0, len(m.snap.Projects))
 	for i := range m.snap.Projects {
@@ -814,8 +876,13 @@ func (m *Model) rebuildRows() {
 		}
 		if !m.flatView {
 			sort.SliceStable(matched, func(i, j int) bool {
-				if !matched[i].StatusChangedAt.Equal(matched[j].StatusChangedAt) {
-					return matched[i].StatusChangedAt.After(matched[j].StatusChangedAt)
+				statusI, statusJ := matched[i].Recency(), matched[j].Recency()
+				if !statusI.Equal(statusJ) {
+					return statusI.After(statusJ)
+				}
+				activityI, activityJ := activityRecency(matched[i]), activityRecency(matched[j])
+				if !activityI.Equal(activityJ) {
+					return activityI.After(activityJ)
 				}
 				return visibleAgentRank(matched[i], m.acknowledged) <
 					visibleAgentRank(matched[j], m.acknowledged)
@@ -823,6 +890,13 @@ func (m *Model) rebuildRows() {
 		}
 		if len(matched) > 0 {
 			visible = append(visible, visibleProject{project: p, agents: matched})
+		}
+	}
+	for _, vp := range visible {
+		key := vp.project.Key
+		if (m.currentDir == key || strings.HasPrefix(m.currentDir, key+string(os.PathSeparator))) &&
+			len(key) > len(m.currentProjectKey) {
+			m.currentProjectKey = key
 		}
 	}
 	if m.flatView {
@@ -836,15 +910,36 @@ func (m *Model) rebuildRows() {
 			}
 		}
 		sort.SliceStable(flat, func(i, j int) bool {
-			recencyI := flatRecencyTime(flat[i].agent)
-			recencyJ := flatRecencyTime(flat[j].agent)
-			if !recencyI.Equal(recencyJ) {
-				return recencyI.After(recencyJ)
+			// The whole point of the flat view: the agent whose status just
+			// changed is first. Every key below only breaks ties between
+			// agents that last changed state at the same instant, which is
+			// the common case — a refresh stamps them all with its own time.
+			statusI := flat[i].agent.Recency()
+			statusJ := flat[j].agent.Recency()
+			if !statusI.Equal(statusJ) {
+				return statusI.After(statusJ)
 			}
-			activityI := flatActivityTime(flat[i].agent)
-			activityJ := flatActivityTime(flat[j].agent)
+			if m.initialCPUSeeded && statusI.Equal(m.initialRecencyAt) {
+				cpuI := m.initialCPU[flat[i].agent.ID]
+				cpuJ := m.initialCPU[flat[j].agent.ID]
+				if cpuI != cpuJ {
+					return cpuI > cpuJ
+				}
+			}
+			activityI := activityRecency(flat[i].agent)
+			activityJ := activityRecency(flat[j].agent)
 			if !activityI.Equal(activityJ) {
 				return activityI.After(activityJ)
+			}
+			currentI := m.isCurrentProject(flat[i].project)
+			currentJ := m.isCurrentProject(flat[j].project)
+			if currentI != currentJ {
+				return currentI
+			}
+			startI := flatStartTime(flat[i].agent)
+			startJ := flatStartTime(flat[j].agent)
+			if !startI.Equal(startJ) {
+				return startI.After(startJ)
 			}
 			doneI := flat[i].agent.Life == collect.LifeDone
 			doneJ := flat[j].agent.Life == collect.LifeDone
