@@ -63,8 +63,12 @@ type Model struct {
 	dismissed              map[string]bool // session-local background dismissals by agent ID
 	stacked                bool            // render the agent list above the detail pane
 	hideDetail             bool            // hide the detail pane so the list fills the viewport
-	currentDir             string          // launch directory; its project stays first in the flat view
+	currentDir             string          // launch directory; its project leads the flat view among agents with no remembered position
 	currentProjectKey      string          // deepest visible project containing currentDir
+	flatOrder              []string        // agent IDs in the order the flat view last displayed them
+	groupedOrder           []string        // agent IDs in the order the grouped view last displayed them
+	rememberedRank         map[string]int  // active view's remembered order, as positions
+	persisted              viewPreferences // last preferences actually written to disk
 	preferencesPath        string
 	notesStore             *notes.Store
 	suggestingNote         bool   // asking whether to prefill a first note from the pane's tmux title
@@ -103,7 +107,7 @@ func New() Model {
 	path := defaultPreferencesPath()
 	prefs := loadViewPreferences(path)
 	currentDir, _ := os.Getwd()
-	return Model{
+	m := Model{
 		loading:          true,
 		notesStore:       notes.Load(),
 		lastNotesRefresh: time.Now(),
@@ -112,18 +116,63 @@ func New() Model {
 		stacked:          prefs.Stacked,
 		hideDetail:       prefs.HideDetail,
 		flatView:         prefs.FlatView,
+		flatOrder:        prefs.FlatOrder,
+		groupedOrder:     prefs.GroupedOrder,
+		persisted:        prefs,
 		acknowledged:     map[string]bool{},
 		dismissed:        map[string]bool{},
 	}
+	m.refreshRememberedRank()
+	return m
 }
 
-func (m Model) persistViewPreferences() {
+// rememberedOrder is the saved layout of the view that is currently on screen.
+// The two views are stored apart because `p` switches between two different
+// orderings and each has to come back the way the user left it.
+func (m *Model) rememberedOrder() []string {
+	if m.flatView {
+		return m.flatOrder
+	}
+	return m.groupedOrder
+}
 
-	saveViewPreferences(m.preferencesPath, viewPreferences{
-		Stacked:    m.stacked,
-		HideDetail: m.hideDetail,
-		FlatView:   m.flatView,
-	})
+func (m *Model) setRememberedOrder(ids []string) {
+	if m.flatView {
+		m.flatOrder = ids
+	} else {
+		m.groupedOrder = ids
+	}
+}
+
+// refreshRememberedRank re-derives the position lookup used while sorting.
+// It must run whenever the active view changes or its saved order is replaced.
+func (m *Model) refreshRememberedRank() {
+	order := m.rememberedOrder()
+	rank := make(map[string]int, len(order))
+	for i, id := range order {
+		rank[id] = i
+	}
+	m.rememberedRank = rank
+}
+
+// persistViewPreferences writes the layout toggles and both remembered orders,
+// skipping the write when nothing would change — the dashboard calls this on
+// every refresh, and a steady list must not mean a disk write every two
+// seconds. A hard kill can still lose the last order; the quit and attach
+// paths flush explicitly so the ordinary exits do not.
+func (m *Model) persistViewPreferences() {
+	prefs := viewPreferences{
+		Stacked:      m.stacked,
+		HideDetail:   m.hideDetail,
+		FlatView:     m.flatView,
+		FlatOrder:    m.flatOrder,
+		GroupedOrder: m.groupedOrder,
+	}
+	if prefs.equal(m.persisted) {
+		return
+	}
+	saveViewPreferences(m.preferencesPath, prefs)
+	m.persisted = prefs
 }
 
 // Chosen returns the action selected before quitting, if any.
@@ -218,6 +267,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pruneAcknowledged()
 		m.pruneDismissed()
 		m.rebuildRows()
+		m.persistViewPreferences()
 		if m.suggestingNote {
 			if a := m.selectedAgent(); a == nil || a.ID != m.suggestedNoteID {
 				m.clearNoteSuggestion()
@@ -404,6 +454,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q", "ctrl+c":
+		m.persistViewPreferences()
 		m.quit = true
 		return m, tea.Quit
 	case "j", "down":
@@ -482,14 +533,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.rebuildRows()
 	case "p":
 		m.flatView = !m.flatView
-		m.persistViewPreferences()
+		m.refreshRememberedRank()
 		m.rebuildRows()
+		m.persistViewPreferences()
 	case "?":
 		m.showHelp = true
 		m.helpOffset = 0
 	case "enter":
 		if a := m.selectedAgent(); a != nil {
 			if action := actionFor(a); action != nil {
+				m.persistViewPreferences()
 				m.action = action
 				m.quit = true
 				return m, tea.Quit
@@ -504,13 +557,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // refreshes. Collect is intentionally stateless because interactive lifecycle
 // comes from the current pane contents, so the dashboard owns this comparison.
 func (m *Model) recordStatusChangeTimes(next *collect.Snapshot) {
-	initialSnapshot := len(m.snap.Agents) == 0
-	seedInitialCPU := !initialSnapshot && !m.initialCPUSeeded
-	if initialSnapshot {
+	if len(m.snap.Agents) == 0 {
 		m.initialRecencyAt = next.Taken
 		m.initialCPU = nil
 		m.initialCPUSeeded = false
 	}
+	// Freeze the CPU tie-breaker from the first snapshot that has agents in it.
+	// Seeding it from the second instead left the opening list ordered by
+	// weaker keys and then visibly reshuffling a refresh later, which is
+	// exactly the settling the remembered order exists to eliminate.
+	seedInitialCPU := !m.initialCPUSeeded && len(next.Agents) > 0
 	if seedInitialCPU {
 		m.initialCPU = make(map[string]float64, len(next.Agents))
 	}
@@ -834,6 +890,39 @@ func visibleProjectLatest(agents []*collect.Agent, acknowledged map[string]bool,
 	return latest
 }
 
+// rememberedProjectRank is where a project's section began in the saved order:
+// the best remembered position among its visible agents.
+func (m *Model) rememberedProjectRank(agents []*collect.Agent) (int, bool) {
+	best, known := 0, false
+	for _, a := range agents {
+		rank, ok := m.rememberedRank[a.ID]
+		if !ok {
+			continue
+		}
+		if !known || rank < best {
+			best, known = rank, true
+		}
+	}
+	return best, known
+}
+
+// rememberDisplayedOrder records the order just rendered so the next launch can
+// reproduce it. A filtered list is a partial view of the agents and would evict
+// everything it hides, so those renders are left out.
+func (m *Model) rememberDisplayedOrder() {
+	if strings.TrimSpace(m.filter) != "" {
+		return
+	}
+	ids := make([]string, 0, len(m.selRows))
+	for _, ri := range m.selRows {
+		if a := m.rows[ri].agent; a != nil {
+			ids = append(ids, a.ID)
+		}
+	}
+	m.setRememberedOrder(ids)
+	m.refreshRememberedRank()
+}
+
 // rebuildRows flattens the snapshot into display rows, honoring the filter, and
 // clamps the selection.
 func (m *Model) rebuildRows() {
@@ -880,6 +969,16 @@ func (m *Model) rebuildRows() {
 				if !statusI.Equal(statusJ) {
 					return statusI.After(statusJ)
 				}
+				if statusI.Equal(m.initialRecencyAt) {
+					rankI, knownI := m.rememberedRank[matched[i].ID]
+					rankJ, knownJ := m.rememberedRank[matched[j].ID]
+					if knownI != knownJ {
+						return knownI
+					}
+					if knownI && rankI != rankJ {
+						return rankI < rankJ
+					}
+				}
 				activityI, activityJ := activityRecency(matched[i]), activityRecency(matched[j])
 				if !activityI.Equal(activityJ) {
 					return activityI.After(activityJ)
@@ -919,11 +1018,26 @@ func (m *Model) rebuildRows() {
 			if !statusI.Equal(statusJ) {
 				return statusI.After(statusJ)
 			}
-			if m.initialCPUSeeded && statusI.Equal(m.initialRecencyAt) {
-				cpuI := m.initialCPU[flat[i].agent.ID]
-				cpuJ := m.initialCPU[flat[j].agent.ID]
-				if cpuI != cpuJ {
-					return cpuI > cpuJ
+			// Agents that have not changed state since amux started keep the
+			// positions the user last saw. Gating on the opening stamp keeps
+			// this to the startup cohort: two agents that transition together
+			// later tie on a different time and fall through to activity, so
+			// last session's layout can never override live ordering.
+			if statusI.Equal(m.initialRecencyAt) {
+				rankI, knownI := m.rememberedRank[flat[i].agent.ID]
+				rankJ, knownJ := m.rememberedRank[flat[j].agent.ID]
+				if knownI != knownJ {
+					return knownI
+				}
+				if knownI && rankI != rankJ {
+					return rankI < rankJ
+				}
+				if m.initialCPUSeeded {
+					cpuI := m.initialCPU[flat[i].agent.ID]
+					cpuJ := m.initialCPU[flat[j].agent.ID]
+					if cpuI != cpuJ {
+						return cpuI > cpuJ
+					}
 				}
 			}
 			activityI := activityRecency(flat[i].agent)
@@ -978,6 +1092,19 @@ func (m *Model) rebuildRows() {
 			if !li.Equal(lj) {
 				return li.After(lj)
 			}
+			// A project sits where its highest-placed agent sat last time,
+			// which restores the whole section — the saved order lists agents
+			// project by project, so their minimum position is the section's.
+			if li.Equal(m.initialRecencyAt) {
+				pi, knownI := m.rememberedProjectRank(visible[i].agents)
+				pj, knownJ := m.rememberedProjectRank(visible[j].agents)
+				if knownI != knownJ {
+					return knownI
+				}
+				if knownI && pi != pj {
+					return pi < pj
+				}
+			}
 			return visible[i].project.Key < visible[j].project.Key
 		})
 		for _, vp := range visible {
@@ -1013,6 +1140,7 @@ func (m *Model) rebuildRows() {
 	if m.sel < 0 {
 		m.sel = 0
 	}
+	m.rememberDisplayedOrder()
 }
 
 func agentMatches(a *collect.Agent, p *collect.Project, note, f string) bool {

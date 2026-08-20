@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -444,6 +445,170 @@ func TestInteractiveRowShowsTimeSinceStatusChange(t *testing.T) {
 	}
 	if got := agentMeta(&collect.Agent{ID: "%2", Kind: collect.KindInteractive}, now); got != "" {
 		t.Errorf("meta for an agent with no observed transition = %q, want empty", got)
+	}
+}
+
+// flatIDs is the flat view's rendered order, for the ordering tests below.
+func flatIDs(m Model) []string {
+	ids := make([]string, 0, len(m.selRows))
+	for _, ri := range m.selRows {
+		if a := m.rows[ri].agent; a != nil {
+			ids = append(ids, a.ID)
+		}
+	}
+	return ids
+}
+
+// openWith feeds one snapshot into a fresh model, the way launching amux does,
+// and returns the model with its first list built.
+func openWith(m Model, snap collect.Snapshot, taken time.Time) Model {
+	snap.Taken = taken
+	m.recordStatusChangeTimes(&snap)
+	m.snap = snap
+	m.rebuildRows()
+	return m
+}
+
+// The reported symptom: the list appeared, then visibly resorted itself a
+// refresh later, because the CPU tie-breaker was frozen from the *second*
+// snapshot. Nothing about the agents changed between the two renders, so
+// neither may the order.
+func TestOpeningOrderDoesNotResortOnTheSecondSnapshot(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	// Alphabetical order disagrees with CPU order, so a late-seeded CPU
+	// tie-breaker shows up as a swap.
+	quiet := collect.Agent{ID: "a", Kind: collect.KindInteractive, PID: 1, Life: collect.LifeWorking, CPU: 5, Project: "/p", Name: "a"}
+	busy := collect.Agent{ID: "b", Kind: collect.KindInteractive, PID: 2, Life: collect.LifeWorking, CPU: 20, Project: "/p", Name: "b"}
+
+	m := openWith(Model{flatView: true}, projSnap(quiet, busy), now)
+	first := flatIDs(m)
+	if len(first) != 2 || first[0] != "b" {
+		t.Fatalf("opening order = %v, want the busiest agent first", first)
+	}
+
+	m = openWith(m, projSnap(quiet, busy), now.Add(2*time.Second))
+	if second := flatIDs(m); !slices.Equal(first, second) {
+		t.Errorf("order resorted on the second snapshot: %v then %v", first, second)
+	}
+}
+
+// Agents that have not changed state since launch open exactly where the user
+// left them, rather than in whatever order the weaker tie-breakers produce.
+func TestRememberedOrderAppliesToTheOpeningList(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	agents := []collect.Agent{mkAgent("a", collect.LifeWorking), mkAgent("b", collect.LifeWorking), mkAgent("c", collect.LifeWorking)}
+
+	m := Model{flatView: true, flatOrder: []string{"c", "a", "b"}}
+	m.refreshRememberedRank()
+	m = openWith(m, projSnap(agents...), now)
+	if got := flatIDs(m); !slices.Equal(got, []string{"c", "a", "b"}) {
+		t.Fatalf("opening order = %v, want the remembered order", got)
+	}
+
+	// A real transition still wins: memory only settles the startup cohort.
+	next := projSnap(agents[0], collect.Agent{ID: "b", Kind: collect.KindBackground, Life: collect.LifeInput, Project: "/p", Name: "b"}, agents[2])
+	m = openWith(m, next, now.Add(2*time.Second))
+	if got := flatIDs(m); len(got) == 0 || got[0] != "b" {
+		t.Errorf("order after a transition = %v, want the changed agent first", got)
+	}
+}
+
+// An agent amux has never displayed has no remembered position. Reading the
+// rank map without checking for presence would give it position zero and put
+// it above every agent the user actually placed.
+func TestUnrememberedAgentsDoNotInheritPositionZero(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	// "gone" is a pane from the last session that no longer exists, so
+	// "known" sits at position 1 and a phantom zero would outrank it.
+	m := Model{flatView: true, flatOrder: []string{"gone", "known"}}
+	m.refreshRememberedRank()
+	m = openWith(m, projSnap(mkAgent("fresh", collect.LifeWorking), mkAgent("known", collect.LifeWorking)), now)
+	if got := flatIDs(m); len(got) == 0 || got[0] != "known" {
+		t.Errorf("opening order = %v, want the remembered agent above the new one", got)
+	}
+}
+
+// p switches between two independently remembered layouts, and each has to
+// come back the way it was left.
+func TestEachViewRestoresItsOwnRememberedOrder(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	agents := projSnap(mkAgent("a", collect.LifeWorking), mkAgent("b", collect.LifeWorking))
+
+	m := Model{flatOrder: []string{"a", "b"}, groupedOrder: []string{"b", "a"}}
+	m.refreshRememberedRank()
+	m = openWith(m, agents, now)
+	if got := flatIDs(m); !slices.Equal(got, []string{"b", "a"}) {
+		t.Fatalf("grouped order = %v, want the remembered grouped order", got)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = next.(Model)
+	if got := flatIDs(m); !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("flat order = %v, want the remembered flat order", got)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = next.(Model)
+	if got := flatIDs(m); !slices.Equal(got, []string{"b", "a"}) {
+		t.Errorf("grouped order after toggling back = %v, want the remembered grouped order", got)
+	}
+}
+
+// A project section returns to where it was, which is where its highest-placed
+// agent sat — the saved order lists agents project by project.
+func TestRememberedOrderRestoresProjectSections(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	alpha := collect.Agent{ID: "alpha1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/alpha", Name: "alpha1"}
+	zeta := collect.Agent{ID: "zeta1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/zeta", Name: "zeta1"}
+
+	m := Model{groupedOrder: []string{"zeta1", "alpha1"}}
+	m.refreshRememberedRank()
+	m = openWith(m, collect.Snapshot{
+		Projects: []collect.Project{
+			{Key: "/alpha", Name: "alpha", Agents: []collect.Agent{alpha}},
+			{Key: "/zeta", Name: "zeta", Agents: []collect.Agent{zeta}},
+		},
+		Agents: []collect.Agent{alpha, zeta},
+	}, now)
+
+	if m.rows[0].kind != rowHeader || m.rows[0].project.Key != "/zeta" {
+		t.Errorf("first project header = %#v, want the remembered leading project", m.rows[0])
+	}
+}
+
+// A filtered list hides agents; recording it would evict every hidden agent
+// from the saved layout.
+func TestFilteredRendersDoNotOverwriteTheRememberedOrder(t *testing.T) {
+	now := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	m := Model{flatView: true, notesStore: notes.Load()}
+	m = openWith(m, projSnap(mkAgent("keep", collect.LifeWorking), mkAgent("other", collect.LifeWorking)), now)
+	before := slices.Clone(m.flatOrder)
+
+	m.filter = "keep"
+	m.rebuildRows()
+	if !slices.Equal(m.flatOrder, before) {
+		t.Errorf("remembered order after filtering = %v, want it left at %v", m.flatOrder, before)
+	}
+}
+
+// Launching amux has to pick the saved layout up from disk, not just hold it
+// in memory for the session that wrote it.
+func TestNewRestoresRememberedOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	saveViewPreferences(defaultPreferencesPath(), viewPreferences{
+		FlatView:     true,
+		FlatOrder:    []string{"%2", "%1"},
+		GroupedOrder: []string{"%1", "%2"},
+	})
+
+	m := New()
+	if !slices.Equal(m.flatOrder, []string{"%2", "%1"}) {
+		t.Errorf("restored flat order = %v, want the saved one", m.flatOrder)
+	}
+	if got, ok := m.rememberedRank["%1"]; !ok || got != 1 {
+		t.Errorf("rank for %%1 = %d (known %v), want position 1 from the flat order", got, ok)
 	}
 }
 
@@ -1745,7 +1910,8 @@ func TestViewTogglesPersistState(t *testing.T) {
 	if !m.flatView {
 		t.Fatal("p should enable flat project view")
 	}
-	if got, want := loadViewPreferences(path), (viewPreferences{Stacked: true, HideDetail: true, FlatView: true}); got != want {
+	want := viewPreferences{Stacked: true, HideDetail: true, FlatView: true, FlatOrder: []string{}}
+	if got := loadViewPreferences(path); !got.equal(want) {
 		t.Fatalf("saved preferences = %#v, want %#v", got, want)
 	}
 }

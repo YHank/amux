@@ -82,6 +82,11 @@ working right now, what's waiting on you, and what's done — grouped by project
   finishes, or asks you a question it jumps to the first row and stays there
   until something else changes. Busy panes redraw constantly; that churn only
   breaks ties, it never outranks a real transition.
+- **Opens where you left it** — every agent already running when amux starts
+  looks equally fresh to a dashboard that has just launched, so amux restores
+  the order each view last showed instead of picking one and visibly resorting
+  a refresh later. Grouped and flat layouts are remembered separately, and `p`
+  brings each back as you left it.
 - **Your own notes, local to amux** — press `i` to jot a short note on any
   agent (why it's running, what you're waiting on); saved to disk, shown in
   the list and detail panel, never written back to tmux/Claude/omp. For a
@@ -147,7 +152,7 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `i` | Add / edit a note; for a first interactive OMP or Claude note, choose whether to prefill its tmux task title (leading `π:` / `π >` / spinner glyph stripped) |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
 | `d` | Show / hide completed, stopped, and acknowledged-error history |
-| `p` | Toggle project-grouped and flat project-prefixed views; both put the latest status change first, and the flat view is a pure recency list |
+| `p` | Toggle project-grouped and flat project-prefixed views; each remembers its own layout and restores it on entry, and both put the latest status change first |
 | `r` | Refresh now |
 | `v` | Toggle the list/detail panes between side-by-side and top/bottom layouts |
 | `m` | Show / hide the detail and terminal-preview pane |

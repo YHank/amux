@@ -84,14 +84,18 @@ The `View()` method assembles the dashboard from the model state; rendered age l
 `StatusChangedAt` is the primary sort key in both views, so an agent goes to the top the moment its lifecycle changes and stays there until another agent changes. Three rules keep that promise:
 
 - **Activity never competes with it.** `ActivityAt` moves on nearly every refresh of a busy pane, so it only breaks ties between agents that last changed state at the same instant — which is the common case, since one refresh stamps every transition with its own `Taken` time. Ranking the two together is what buried real transitions in ordinary churn.
+- **The startup cohort holds its remembered positions.** Every agent present when amux launches is stamped with the same `Taken` time, so the primary key cannot separate them and the list would otherwise be ordered by whichever weak tie-breaker happened to apply — then visibly resort once the next snapshot arrived. `rememberedRank` (restored from `preferences.json`) settles them instead, gated on `Recency().Equal(initialRecencyAt)` so it governs the startup cohort and nothing else: agents that transition later move by `Recency`, and two agents transitioning in the same refresh tie on a *different* time and fall through to activity as documented above. Look ranks up with the two-value form — a missing agent reads as position zero and would sort above everything the user actually placed.
 - **Recency is `collect.Agent.Recency()`: the dashboard's own observation whenever it has one, the state file's timestamp only before that.** `UpdatedAt` is a background state file's *write* timestamp — a working job rewrites it as its token count climbs — so ranking on it would reintroduce the same churn problem the previous rule solves. Interactive agents never carry `UpdatedAt` at all, so both fields are needed for the two kinds to sort against each other; ongoing background progress still breaks ties at the activity tier. This applies to project headers (`visibleProjectLatest`) as much as to rows; keying headers on `UpdatedAt` alone tied every tmux-only project at the zero time and silently fell back to alphabetical order.
 - **Attention rank stays a tiebreaker in the flat view, and the leading key for grouped project headers.** Grouped view is attention-first by design; the flat view is explicitly a recency list.
+- **`initialCPU` freezes from the first snapshot that has agents**, not the second. It only orders startup-cohort agents with no remembered position, and seeding it a refresh late was itself a visible resort.
 
 `collect.group` applies the same ordering when it builds the snapshot, but `rebuildRows` re-sorts everything the user actually sees — filtering, dismissals, and acknowledgements change which agents a project is ranked on.
 - **v** (vertical): Toggles stacked (list above detail) vs. side-by-side layout
 - **m** (manage/mute detail): Hides the detail panel so the list fills the viewport
 
 The `p`, `v`, and `m` view preferences persist to `preferences.json` across sessions; `d` is session-local.
+
+`preferences.json` also stores `flat_order` and `grouped_order`: the agent IDs each view last displayed, in order. `p` switches between two genuinely different layouts, so each is remembered apart and restored on entry. `rebuildRows` records the order it just built — except while a filter is active, since a filtered list would evict every agent it hides. `persistViewPreferences` skips writes that would not change the file, which matters because the two-second refresh calls it; the quit and attach paths flush explicitly, so only a hard kill loses the last order. Concurrent amux instances share one file, last writer wins.
 
 #### Rendering Constraints & Resilience
 
