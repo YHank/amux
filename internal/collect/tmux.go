@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // pane is one tmux pane as reported by `tmux list-panes`.
@@ -97,24 +98,25 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 			life = LifeInput
 		}
 		agents = append(agents, Agent{
-			ID:               pn.paneID,
-			Window:           pn.window,
-			Kind:             KindInteractive,
-			Tool:             tool,
-			Name:             pn.target,
-			Life:             life,
-			State:            "live",
-			Detail:           titleOrCmd(pn.title, ap),
-			CWD:              pn.path,
-			Project:          projectKey(pn.path),
-			ProcessStartedAt: ap.startedAt,
-			TmuxTarget:       pn.target,
-			Session:          pn.session,
-			PaneTitle:        pn.title,
-			PID:              ap.pid,
-			CPU:              procs.subtreeCPU(ap.pid),
-			Preview:          preview,
-			NeedsInput:       needsInput,
+			ID:                 pn.paneID,
+			Window:             pn.window,
+			Kind:               KindInteractive,
+			Tool:               tool,
+			Name:               pn.target,
+			Life:               life,
+			State:              "live",
+			Detail:             titleOrCmd(pn.title, ap),
+			CWD:                pn.path,
+			Project:            projectKey(pn.path),
+			ProcessStartedAt:   ap.startedAt,
+			TmuxTarget:         pn.target,
+			Session:            pn.session,
+			PaneTitle:          pn.title,
+			PID:                ap.pid,
+			CPU:                procs.subtreeCPU(ap.pid),
+			Preview:            preview,
+			PreviewFingerprint: previewFingerprint(preview),
+			NeedsInput:         needsInput,
 		})
 	}
 	return agents, nil
@@ -128,9 +130,10 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 // the capture range n lines up into the scrollback; with no "-E" the range runs
 // to the bottom of the visible screen, so the result is n scrollback lines plus
 // the whole screen — typically well over n lines. Callers that want a bounded
-// window must slice the tail themselves (see contentSpinnerScanLines and
-// choicePromptScanLines), and must budget for multi-line status bars sitting
-// between the real signal and the last line. Best-effort: a
+// window must slice the tail themselves (see trailingLines and the
+// contentSpinnerScanLines / claudeStatusScanLines / choicePromptScanLines
+// bounds), and must budget for multi-line status bars sitting between the real
+// signal and the last line. Best-effort: a
 // capture failure (pane closed mid-scan, etc.) yields nil rather than an
 // error, since a missing preview shouldn't drop the whole agent from the
 // snapshot.
@@ -156,6 +159,82 @@ func stripANSI(s string) string {
 	return ansiCSI.ReplaceAllString(s, "")
 }
 
+var counterPreviewLine = regexp.MustCompile(`(?i)^(?:[↓↑]\s+\d+(?:\.\d+)?[km]?(?:\s+tokens)?|tokens:\s*\d+(?:\.\d+)?[km]?(?:\s*[·|]\s*\d+(?:\.\d+)?\s*tok/s)?)$`)
+
+// previewFingerprint keeps meaningful pane output for activity ordering while
+// dropping spinner and token-counter rows that change on every refresh.
+func previewFingerprint(lines []string) string {
+	var b strings.Builder
+	for _, line := range lines {
+		plain := strings.TrimSpace(stripANSI(line))
+		if plain == "" {
+			continue
+		}
+		first, _ := utf8.DecodeRuneInString(plain)
+		if isSpinnerGlyph(first) || counterPreviewLine.MatchString(plain) ||
+			claudeWorkingStatus.MatchString(plain) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(plain)
+	}
+	return b.String()
+}
+
+// trailingLines returns at most n lines from the bottom of a capture, after
+// dropping the blank rows a partially drawn screen leaves underneath its last
+// real output. Without that trim a pane holding five empty bottom rows only
+// ever exposes n-5 lines of signal to the scanners below, which is how a
+// status row or prompt footer sitting just inside the window goes unseen.
+func trailingLines(lines []string, n int) []string {
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(stripANSI(lines[end-1])) == "" {
+		end--
+	}
+	lines = lines[:end]
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
+}
+
+// claudeWorkingStatus matches the in-body status row Claude Code renders only
+// while a turn is actually generating: a gerund with a trailing ellipsis
+// followed by a live counter, e.g.
+//
+//	· Doodling… (3m 29s · ↓ 9.7k tokens)
+//	✳ Doodling… (12s · ↓ 8.9k tokens · esc to interrupt)
+//
+// Captured live from Claude Code 2.1.237. The moment the turn ends the row
+// loses both the ellipsis and the counter ("✻ Churned for 7m 52s"), so this
+// cannot match a finished pane. Either the interrupt hint or an elapsed time
+// paired with the token arrow is required — a bare "…(" is ordinary prose.
+var claudeWorkingStatus = regexp.MustCompile(`…\s*\([^)]*(?:esc to interrupt|\d+\s*[hms]\b[^)]*(?:↓|tokens))`)
+
+// claudeStatusScanLines bounds how far up from the bottom that status row is
+// looked for. It is wider than contentSpinnerScanLines because Claude Code
+// keeps a multi-line input box and any user statusline below the row: the pane
+// verified here renders three box lines plus four statusline rows, putting the
+// signal nine lines from the bottom.
+const claudeStatusScanLines = 12
+
+// claudeContentShowsWork reports whether a Claude Code pane's own output shows
+// it mid-turn. Claude Code cannot be judged by its tmux title: 2.1.237 leaves
+// "✳ <task>" in the title after the turn ends — verified live against two
+// finished panes whose bodies showed a completed response and a bare "❯"
+// prompt while their titles still carried the star. The body row is the only
+// signal that clears when the work does.
+func claudeContentShowsWork(lines []string) bool {
+	for _, l := range trailingLines(lines, claudeStatusScanLines) {
+		if claudeWorkingStatus.MatchString(stripANSI(l)) {
+			return true
+		}
+	}
+	return false
+}
+
 // choicePromptScanLines bounds how many trailing lines are checked for the
 // choice-prompt footer. A genuine pending prompt is always the current bottom
 // of the screen — scanning the whole preview window instead risks matching
@@ -175,11 +254,7 @@ const choicePromptScanLines = 8
 // and words with question screens but not the full interaction instructions.
 // Matching the complete instruction combination keeps detection conservative.
 func looksLikeChoicePrompt(tool string, lines []string) bool {
-	tail := lines
-	if len(tail) > choicePromptScanLines {
-		tail = tail[len(tail)-choicePromptScanLines:]
-	}
-	for _, l := range tail {
+	for _, l := range trailingLines(lines, choicePromptScanLines) {
 		plain := stripANSI(l)
 		if strings.Contains(plain, "Enter to select") && strings.Contains(plain, "navigate") {
 			return true
@@ -224,7 +299,13 @@ func looksLikeChoicePrompt(tool string, lines []string) bool {
 // their task finished. The same star glyphs DO appear in Claude Code's in-body
 // status line while working ("✶ Wibbling… (2m 32s · ↓ 10.2k tokens)"), so the
 // family is ambiguous across positions and is not a safe signal anywhere.
-// Claude Code panes are already covered by the title check.
+//
+// 2.1.237 makes that worse, not better: it leaves "✳ <task>" in the pane title
+// after the turn ends. Three star-titled panes were captured live at once —
+// two finished (bodies showing "✻ Churned for 7m 52s" and a bare "❯"
+// prompt) and one genuinely generating. The star says a task was *entered*,
+// never that one is *running*, so Claude Code cannot be judged by its title
+// alone on current builds; claudeContentShowsWork reads the body row instead.
 //
 // Also excluded for the same reason: '·' (U+00B7) and '∗' (U+2217).
 func isSpinnerGlyph(r rune) bool {
@@ -247,9 +328,11 @@ func isSpinnerGlyph(r rune) bool {
 // version — see isSpinnerGlyph. Oh My Pi does NOT: its title is a static
 // "π: <task>" whether
 // working or idle — verified live by capturing the same omp pane both mid-task
-// and at rest, both showing the identical title shape. So this alone
-// correctly detects Claude Code but always reads Idle for omp; omp's own
-// signal is checked separately, in its pane content (see contentShowsSpinner).
+// and at rest, both showing the identical title shape. So this alone reads
+// Idle for omp, and — since Claude Code 2.1.237 moved to a star title that
+// outlives the turn — for current Claude Code too. Both tools' real signals
+// live in their pane content instead (see contentShowsSpinner). A spinner
+// title still wins here, so older Claude Code builds keep working unchanged.
 func interactiveLife(title string) Lifecycle {
 	t := strings.TrimSpace(title)
 	if t == "" {
@@ -280,11 +363,12 @@ const contentSpinnerScanLines = 10
 // its working signal in the tmux title, so title-only detection would leave
 // both looking idle while they work.
 func contentShowsSpinner(tool string, lines []string) bool {
-	tail := lines
-	if len(tail) > contentSpinnerScanLines {
-		tail = tail[len(tail)-contentSpinnerScanLines:]
+	// Claude Code renders neither family of spinner glyph in its body — its
+	// working row is text — so it gets its own, wider-windowed check.
+	if tool == "claude" && claudeContentShowsWork(lines) {
+		return true
 	}
-	for _, l := range tail {
+	for _, l := range trailingLines(lines, contentSpinnerScanLines) {
 		plain := strings.TrimSpace(stripANSI(l))
 		if plain == "" {
 			continue

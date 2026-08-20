@@ -106,6 +106,61 @@ func TestParseProcLineUsesElapsedTimeForProcessStart(t *testing.T) {
 	}
 }
 
+func TestPreviewFingerprintExcludesVolatileRows(t *testing.T) {
+	lines := []string{
+		"\x1b[31m⠐ working task\x1b[0m",
+		"↓ 12.9k",
+		"tokens: 12345 · 15 tok/s",
+		"reduce tokens before retry",
+		"press ↓ to continue",
+		"result contains ⠐ symbol",
+		"processed ↓ 12.9k rows",
+		"\x1b[32mmeaningful output\x1b[0m",
+	}
+	want := "reduce tokens before retry\npress ↓ to continue\nresult contains ⠐ symbol\nprocessed ↓ 12.9k rows\nmeaningful output"
+	if got := previewFingerprint(lines); got != want {
+		t.Errorf("preview fingerprint = %q, want %q", got, want)
+	}
+}
+
+// A working Claude Code pane reprints its status row every second with a new
+// elapsed time. Left in the fingerprint it would report activity on every
+// refresh, which both reorders the flat view constantly and — because the
+// debounce only accepts two identical readings in a row — hides the real
+// output changes underneath it.
+func TestPreviewFingerprintExcludesClaudeStatusRow(t *testing.T) {
+	first := previewFingerprint([]string{
+		"⏺ Update(internal/ui/app.go)",
+		"· Doodling… (3m 29s · ↓ 9.7k tokens)",
+	})
+	second := previewFingerprint([]string{
+		"⏺ Update(internal/ui/app.go)",
+		"✳ Doodling… (3m 31s · ↓ 9.9k tokens · esc to interrupt)",
+	})
+	if first != second {
+		t.Errorf("ticking status row changed the fingerprint: %q vs %q", first, second)
+	}
+	if first != "⏺ Update(internal/ui/app.go)" {
+		t.Errorf("fingerprint = %q, want the real output line only", first)
+	}
+}
+
+// A partially drawn screen leaves blank rows under its last real output. They
+// must not consume the scan window, or a prompt footer sitting just inside it
+// scrolls out of view and the pane silently stops reporting that it is waiting.
+func TestTrailingBlankRowsDoNotShrinkTheScanWindow(t *testing.T) {
+	pending := []string{
+		"Pick A or B?",
+		"❯ 1. A",
+		"  2. B",
+		"Enter to select · ↑/↓ to navigate · Esc to cancel",
+		"", "", "", "", "", "", "", "",
+	}
+	if !looksLikeChoicePrompt("claude", pending) {
+		t.Error("blank bottom rows hid a pending choice prompt from the scan window")
+	}
+}
+
 func TestNormalizeLife(t *testing.T) {
 	cases := []struct {
 		state string
@@ -342,12 +397,10 @@ func TestContentShowsSpinner(t *testing.T) {
 		t.Error("OpenCode footer must not mark a Claude pane as working")
 	}
 
-	// Real Claude Code 2.1.228 fixture captured live mid-task. Its in-body
-	// status line leads with a star glyph — deliberately NOT detected, because
-	// the same family marks an idle pane title (see isSpinnerGlyph). Claude
-	// Code is covered by interactiveLife's title check instead, so a false
-	// negative here costs nothing while a false positive would mark every
-	// waiting agent as busy.
+	// Real Claude Code 2.1.228 fixture captured live mid-task. The star glyph
+	// itself is still not a spinner (the same family leads an idle pane
+	// title — see isSpinnerGlyph); what marks the pane working is the row's
+	// live counter, which only renders while a turn generates.
 	claudeWorking := []string{
 		"⏺ Update(admin/html/subpage/todayStatus/tools/tools.js)",
 		"⎿  Added 2 lines, removed 7 lines",
@@ -362,8 +415,72 @@ func TestContentShowsSpinner(t *testing.T) {
 		"40%(400k) | Opus 5 (1M context) | feat/yhank/today_status | v2.1.228",
 		"⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent",
 	}
-	if contentShowsSpinner("claude", claudeWorking) {
-		t.Error("Claude Code's star status line must not be treated as a body spinner")
+	if !contentShowsSpinner("claude", claudeWorking) {
+		t.Error("expected Claude Code's live status counter to be detected")
+	}
+
+	// Real Claude Code 2.1.237 fixtures captured live from three panes at once.
+	// The working pane's title ("✳ 단축키 p 토글 정렬 기능 수정") was
+	// indistinguishable from the two finished panes' titles, so the body row is
+	// the only thing separating them. Note the status row sits nine lines above
+	// the bottom, under a three-line input box and a four-row statusline.
+	claudeWorking237 := []string{
+		"", "", "", "", "",
+		"· Doodling… (3m 29s · ↓ 9.7k tokens)",
+		"",
+		"──────────────────────────────────────",
+		"❯",
+		"──────────────────────────────────────",
+		"  branch:main | +5 !9 ⇡2",
+		"  [OMC#4.15.10L] | Model: Opus 5 | session:3m | ctx:[#---------]10% (100k)",
+		"  10%(100k) | Opus 5 (1M context) | main | v2.1.237",
+		"  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent",
+	}
+	if !contentShowsSpinner("claude", claudeWorking237) {
+		t.Error("expected Claude Code 2.1.237's status row to be detected under a tall statusline")
+	}
+
+	// Same build, turn finished: the row loses its ellipsis and counter.
+	claudeFinished237 := []string{
+		"✻ Churned for 7m 52s",
+		"",
+		"※ recap: 일일 탭에 푸시 전송 팝업을 추가했습니다. (disable recaps in /config)",
+		"──────────────────────────────────────",
+		"❯",
+		"──────────────────────────────────────",
+		"  branch:feat/yhank/today_status (wt:english_kangan) | +5 !1 ?3",
+		"  23%(230k) | Opus 5 (1M context) | feat/yhank/today_status | v2.1.235",
+		"  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent",
+	}
+	if contentShowsSpinner("claude", claudeFinished237) {
+		t.Error("a finished Claude Code turn must not be detected as working")
+	}
+
+	// The "claude agents" launcher screen: idle, and its blank bottom rows must
+	// not shift the scan window off the real content either.
+	claudeLauncher := []string{
+		" A different way to work with Claude: hand off a bigger task than you would chat through.",
+		"──────────────────────────────────────",
+		"❯ describe a task for a new session",
+		"──────────────────────────────────────",
+		"  ? for shortcuts",
+		"", "", "",
+	}
+	if contentShowsSpinner("claude", claudeLauncher) {
+		t.Error("the Claude Code launcher screen must not be detected as working")
+	}
+
+	// Scrollback guard, Claude flavour: this repo's own source and any pane
+	// quoting it carry the marker text, so it must not match from history.
+	claudeBuried := append([]string{"✶ Wibbling… (2m 32s · ↓ 10.2k tokens)"},
+		make([]string, 20)...)
+	for i := range claudeBuried {
+		if claudeBuried[i] == "" {
+			claudeBuried[i] = "filler"
+		}
+	}
+	if contentShowsSpinner("claude", claudeBuried) {
+		t.Error("a Claude status row outside the trailing scan window must not match")
 	}
 
 	// The bare input box on its own is idle, not working: none of the box

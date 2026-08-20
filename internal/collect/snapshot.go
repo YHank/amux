@@ -153,8 +153,11 @@ func projectAttention(p Project) (rank, count int) {
 func projectLatest(p Project, rank int) time.Time {
 	var latest time.Time
 	for _, a := range p.Agents {
-		if AttentionRank(a.Life) == rank && a.UpdatedAt.After(latest) {
-			latest = a.UpdatedAt
+		if AttentionRank(a.Life) != rank {
+			continue
+		}
+		if t := a.Recency(); t.After(latest) {
+			latest = t
 		}
 	}
 	return latest
