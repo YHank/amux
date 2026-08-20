@@ -70,9 +70,10 @@ type Agent struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	ProcessStartedAt time.Time // interactive process start time observed from ps
+	ActivityAt       time.Time // interactive pane title or content last changed in amux
 	StatusChangedAt  time.Time // when amux last observed this agent's Life change
-	// agent has asked a question and is waiting on the user to pick an
-	// option — set from job state.json (background) or a live scan of the
+	// NeedsInput reports that the agent asked a question and is waiting for the
+	// user to pick an option — set from job state.json (background) or a live
 	// pane's own content for the choice-prompt UI (interactive).
 	NeedsInput bool
 

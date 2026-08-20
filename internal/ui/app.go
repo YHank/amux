@@ -9,7 +9,7 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
-
+	"github.com/charmbracelet/lipgloss"
 	"github.com/kyhan/amux/internal/collect"
 	"github.com/kyhan/amux/internal/notes"
 )
@@ -52,28 +52,29 @@ type Model struct {
 	sel     int   // index into selectable agent rows
 	selRows []int // indices into rows that are selectable (agents)
 
-	filter          string
-	filtering       bool
-	showDone        bool            // reveal completed, stopped, and dismissed agents
-	flatView        bool            // show a single project-prefixed list instead of grouped project sections
-	hidden          int             // count of agents hidden by the current view
-	acknowledged    map[string]bool // session-local error acknowledgements by agent ID
-	dismissed       map[string]bool // session-local background dismissals by agent ID
-	stacked         bool            // render the agent list above the detail pane
-	hideDetail      bool            // hide the detail pane so the list fills the viewport
-	preferencesPath string
-	notesStore      *notes.Store
-	suggestingNote  bool   // asking whether to prefill a first note from the pane's tmux title
-	suggestedNote   string // pane-title task offered as the note prefill
-	suggestedNoteID string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
-	naming          bool   // capturing a note for the selected agent
-	namingAgentID   string // agent that owns the in-progress note
-	noteInput       string
-	composing       bool // capturing a message to send into the selected agent's pane
-	composeInput    string
-	showHelp        bool   // show the keyboard-shortcuts popup
-	helpOffset      int    // first visible keyboard-help entry
-	notice          string // brief, self-clearing status line (e.g. "sent to <pane>")
+	filter           string
+	filtering        bool
+	showDone         bool            // reveal completed, stopped, and dismissed agents
+	flatView         bool            // show a single project-prefixed list instead of grouped project sections
+	flatProjectWidth int             // display width of the longest visible flat-view project name
+	hidden           int             // count of agents hidden by the current view
+	acknowledged     map[string]bool // session-local error acknowledgements by agent ID
+	dismissed        map[string]bool // session-local background dismissals by agent ID
+	stacked          bool            // render the agent list above the detail pane
+	hideDetail       bool            // hide the detail pane so the list fills the viewport
+	preferencesPath  string
+	notesStore       *notes.Store
+	suggestingNote   bool   // asking whether to prefill a first note from the pane's tmux title
+	suggestedNote    string // pane-title task offered as the note prefill
+	suggestedNoteID  string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
+	naming           bool   // capturing a note for the selected agent
+	namingAgentID    string // agent that owns the in-progress note
+	noteInput        string
+	composing        bool // capturing a message to send into the selected agent's pane
+	composeInput     string
+	showHelp         bool   // show the keyboard-shortcuts popup
+	helpOffset       int    // first visible keyboard-help entry
+	notice           string // brief, self-clearing status line (e.g. "sent to <pane>")
 
 	confirmingKill bool // "kill <pane>? y to confirm" — any other key cancels
 	killTarget     string
@@ -501,22 +502,47 @@ func (m Model) recordStatusChangeTimes(next *collect.Snapshot) {
 		previous[agent.ID] = agent
 	}
 
-	changedAt := make(map[string]time.Time, len(next.Agents))
+	statusChangedAt := make(map[string]time.Time, len(next.Agents))
+	activityAt := make(map[string]time.Time, len(next.Agents))
+	lifecycle := make(map[string]collect.Lifecycle, len(next.Agents))
+	needsInput := make(map[string]bool, len(next.Agents))
 	for i := range next.Agents {
 		agent := &next.Agents[i]
-		if prior, ok := previous[agent.ID]; ok && sameAgentInstance(prior, *agent) &&
-			prior.Life == agent.Life && !prior.StatusChangedAt.IsZero() {
+		prior, known := previous[agent.ID]
+		sameInstance := known && sameAgentInstance(prior, *agent)
+		// capturePane reports failures as a nil preview. Its content-derived
+		// lifecycle and input state are then unavailable, so retain the last
+		// valid values unless the independently collected title/detail changed.
+		if sameInstance && agent.Kind == collect.KindInteractive && agent.Preview == nil &&
+			prior.PaneTitle == agent.PaneTitle && prior.Detail == agent.Detail {
+			agent.Life = prior.Life
+			agent.NeedsInput = prior.NeedsInput
+		}
+		if sameInstance && prior.Life == agent.Life && !prior.StatusChangedAt.IsZero() {
 			agent.StatusChangedAt = prior.StatusChangedAt
 		} else {
 			agent.StatusChangedAt = next.Taken
 		}
-		changedAt[agent.ID] = agent.StatusChangedAt
+		if agent.Kind == collect.KindInteractive {
+			if !sameInstance || prior.ActivityAt.IsZero() || interactiveActivityChanged(prior, *agent) {
+				agent.ActivityAt = next.Taken
+			} else {
+				agent.ActivityAt = prior.ActivityAt
+			}
+		}
+		statusChangedAt[agent.ID] = agent.StatusChangedAt
+		activityAt[agent.ID] = agent.ActivityAt
+		lifecycle[agent.ID] = agent.Life
+		needsInput[agent.ID] = agent.NeedsInput
 	}
 
 	for i := range next.Projects {
 		for j := range next.Projects[i].Agents {
 			agent := &next.Projects[i].Agents[j]
-			agent.StatusChangedAt = changedAt[agent.ID]
+			agent.Life = lifecycle[agent.ID]
+			agent.NeedsInput = needsInput[agent.ID]
+			agent.StatusChangedAt = statusChangedAt[agent.ID]
+			agent.ActivityAt = activityAt[agent.ID]
 		}
 	}
 }
@@ -532,6 +558,26 @@ func sameAgentInstance(prior, current collect.Agent) bool {
 		return true
 	}
 	return prior.PID != 0 && prior.PID == current.PID
+}
+
+func interactiveActivityChanged(prior, current collect.Agent) bool {
+	if prior.PaneTitle != current.PaneTitle || prior.Detail != current.Detail {
+		return true
+	}
+	// A nil preview is capturePane's failure signal, not pane activity. Do not
+	// promote an idle pane because tmux briefly failed to provide its contents.
+	if prior.Preview == nil || current.Preview == nil {
+		return false
+	}
+	if len(prior.Preview) != len(current.Preview) {
+		return true
+	}
+	for i := range prior.Preview {
+		if prior.Preview[i] != current.Preview[i] {
+			return true
+		}
+	}
+	return false
 }
 
 // pruneNotes drops any stored note whose agent isn't in the current snapshot
@@ -676,6 +722,14 @@ func flatActivityTime(a *collect.Agent) time.Time {
 	return a.UpdatedAt
 }
 
+func flatRecencyTime(a *collect.Agent) time.Time {
+	latest := a.StatusChangedAt
+	if a.ActivityAt.After(latest) {
+		latest = a.ActivityAt
+	}
+	return latest
+}
+
 type visibleProject struct {
 	project *collect.Project
 	agents  []*collect.Agent
@@ -734,6 +788,7 @@ func (m *Model) rebuildRows() {
 	m.rows = m.rows[:0]
 	m.selRows = m.selRows[:0]
 	m.hidden = 0
+	m.flatProjectWidth = 0
 	f := strings.ToLower(strings.TrimSpace(m.filter))
 	visible := make([]visibleProject, 0, len(m.snap.Projects))
 	for i := range m.snap.Projects {
@@ -773,13 +828,18 @@ func (m *Model) rebuildRows() {
 	if m.flatView {
 		flat := make([]row, 0, len(m.snap.Agents))
 		for _, vp := range visible {
+			if width := lipgloss.Width(vp.project.Name); width > m.flatProjectWidth {
+				m.flatProjectWidth = width
+			}
 			for _, a := range vp.agents {
 				flat = append(flat, row{kind: rowAgent, project: vp.project, agent: a})
 			}
 		}
 		sort.SliceStable(flat, func(i, j int) bool {
-			if !flat[i].agent.StatusChangedAt.Equal(flat[j].agent.StatusChangedAt) {
-				return flat[i].agent.StatusChangedAt.After(flat[j].agent.StatusChangedAt)
+			recencyI := flatRecencyTime(flat[i].agent)
+			recencyJ := flatRecencyTime(flat[j].agent)
+			if !recencyI.Equal(recencyJ) {
+				return recencyI.After(recencyJ)
 			}
 			activityI := flatActivityTime(flat[i].agent)
 			activityJ := flatActivityTime(flat[j].agent)

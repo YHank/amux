@@ -390,7 +390,11 @@ func agentRowName(a *collect.Agent) string {
 func (m Model) renderAgentRowName(a *collect.Agent, p *collect.Project, style lipgloss.Style, selected bool) string {
 	name := agentRowName(a)
 	if m.flatView && p != nil && p.Name != "" {
-		name = p.Name + " · " + name
+		projectName := p.Name
+		if padding := m.flatProjectWidth - lipgloss.Width(projectName); padding > 0 {
+			projectName += strings.Repeat(" ", padding)
+		}
+		name = projectName + " · " + name
 	}
 	if a.Kind != collect.KindInteractive || a.Session == "" || a.Window == "" {
 		return style.Render(name)

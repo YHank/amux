@@ -87,10 +87,13 @@ func TestProjectViewToggleFlattensAndPrefixesAgentNames(t *testing.T) {
 		}
 	}
 	list := m.renderList(120, 12)
-	for _, name := range []string{"alpha · worker", "beta · reviewer"} {
+	for _, name := range []string{"alpha · worker", "beta  · reviewer"} {
 		if !strings.Contains(list, name) {
-			t.Errorf("flat list = %q, missing project-prefixed name %q", list, name)
+			t.Errorf("flat list = %q, missing aligned project-prefixed name %q", list, name)
 		}
+	}
+	if m.flatProjectWidth != lipgloss.Width("alpha") {
+		t.Errorf("flat project width = %d, want %d", m.flatProjectWidth, lipgloss.Width("alpha"))
 	}
 	if strings.Contains(m.renderFooter(), "J/K project") {
 		t.Errorf("flat footer still advertises project navigation: %q", m.renderFooter())
@@ -571,6 +574,115 @@ func TestStatusTransitionTimeResetsForReplacementInteractiveProcess(t *testing.T
 	m.recordStatusChangeTimes(&next)
 	if got := next.Agents[0].StatusChangedAt; !got.Equal(second) {
 		t.Errorf("replacement process timestamp = %v, want %v", got, second)
+	}
+}
+
+func TestInteractiveContentChangeRefreshesFlatActivityOrder(t *testing.T) {
+	first := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	active := collect.Agent{
+		ID: "active", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		StatusChangedAt: first, ActivityAt: first, PaneTitle: "old task", Preview: []string{"old output"},
+		Project: "/p", Name: "active",
+	}
+	other := collect.Agent{
+		ID: "other", Kind: collect.KindInteractive, PID: 102, Life: collect.LifeWorking,
+		StatusChangedAt: first, ActivityAt: first, PaneTitle: "other task", Preview: []string{"stable output"},
+		Project: "/p", Name: "other",
+	}
+	m := Model{snap: projSnap(active, other)}
+	next := projSnap(
+		collect.Agent{
+			ID: "active", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+			PaneTitle: "new task", Preview: []string{"new output"}, Project: "/p", Name: "active",
+		},
+		other,
+	)
+	next.Taken = second
+
+	m.recordStatusChangeTimes(&next)
+	if got := next.Agents[0].ActivityAt; !got.Equal(second) {
+		t.Errorf("activity timestamp = %v, want %v", got, second)
+	}
+	if got := next.Projects[0].Agents[0].ActivityAt; !got.Equal(second) {
+		t.Errorf("project activity timestamp = %v, want %v", got, second)
+	}
+	if got := next.Agents[0].StatusChangedAt; !got.Equal(first) {
+		t.Errorf("status timestamp = %v, want unchanged %v", got, first)
+	}
+
+	m.snap = next
+	m.flatView = true
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "active" {
+		t.Errorf("first flat agent = %#v, want recently active pane", got)
+	}
+}
+
+func TestMissingPanePreviewDoesNotCountAsActivity(t *testing.T) {
+	prior := collect.Agent{
+		Kind: collect.KindInteractive, PaneTitle: "task", Detail: "running", Preview: []string{"output"},
+	}
+	current := prior
+	current.Preview = nil
+	if interactiveActivityChanged(prior, current) {
+		t.Fatal("missing current preview counted as pane activity")
+	}
+
+	prior.Preview = nil
+	current.Preview = []string{"output"}
+	if interactiveActivityChanged(prior, current) {
+		t.Fatal("recovered preview counted as pane activity")
+	}
+}
+
+func TestMissingPanePreviewPreservesLifecycleAndRecency(t *testing.T) {
+	first := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	prior := collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		NeedsInput: true, StatusChangedAt: first, ActivityAt: first,
+		PaneTitle: "task", Detail: "running", Preview: []string{"output"}, Project: "/p",
+	}
+	m := Model{snap: projSnap(prior)}
+	next := projSnap(collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeIdle,
+		PaneTitle: "task", Detail: "running", Preview: nil, Project: "/p",
+	})
+	next.Taken = second
+
+	m.recordStatusChangeTimes(&next)
+	got := next.Agents[0]
+	if got.Life != collect.LifeWorking || !got.NeedsInput {
+		t.Errorf("capture failure lifecycle = %q input=%v, want working input=true", got.Life, got.NeedsInput)
+	}
+	if !got.StatusChangedAt.Equal(first) || !got.ActivityAt.Equal(first) {
+		t.Errorf("capture failure timestamps = status:%v activity:%v, want %v", got.StatusChangedAt, got.ActivityAt, first)
+	}
+	projectAgent := next.Projects[0].Agents[0]
+	if projectAgent.Life != collect.LifeWorking || !projectAgent.NeedsInput {
+		t.Errorf("project capture failure lifecycle = %q input=%v, want working input=true", projectAgent.Life, projectAgent.NeedsInput)
+	}
+}
+
+func TestPaneTitleChangeUpdatesActivityWithoutPreview(t *testing.T) {
+	first := time.Date(2026, time.August, 20, 9, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	prior := collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeWorking,
+		StatusChangedAt: first, ActivityAt: first, PaneTitle: "old task", Preview: []string{"output"}, Project: "/p",
+	}
+	m := Model{snap: projSnap(prior)}
+	next := projSnap(collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, PID: 101, Life: collect.LifeIdle,
+		PaneTitle: "new task", Preview: nil, Project: "/p",
+	})
+	next.Taken = second
+
+	m.recordStatusChangeTimes(&next)
+	got := next.Agents[0]
+	if got.Life != collect.LifeIdle || !got.StatusChangedAt.Equal(second) || !got.ActivityAt.Equal(second) {
+		t.Errorf("title transition = life:%q status:%v activity:%v, want idle at %v", got.Life, got.StatusChangedAt, got.ActivityAt, second)
 	}
 }
 
