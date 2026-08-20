@@ -67,9 +67,10 @@ type Agent struct {
 	CWD     string // working directory
 	Project string // normalized project key (git root or cwd)
 
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	StatusChangedAt time.Time // when amux last observed this agent's Life change
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	ProcessStartedAt time.Time // interactive process start time observed from ps
+	StatusChangedAt  time.Time // when amux last observed this agent's Life change
 	// agent has asked a question and is waiting on the user to pick an
 	// option — set from job state.json (background) or a live scan of the
 	// pane's own content for the choice-prompt UI (interactive).

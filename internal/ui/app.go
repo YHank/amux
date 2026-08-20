@@ -55,6 +55,7 @@ type Model struct {
 	filter          string
 	filtering       bool
 	showDone        bool            // reveal completed, stopped, and dismissed agents
+	flatView        bool            // show a single project-prefixed list instead of grouped project sections
 	hidden          int             // count of agents hidden by the current view
 	acknowledged    map[string]bool // session-local error acknowledgements by agent ID
 	dismissed       map[string]bool // session-local background dismissals by agent ID
@@ -70,6 +71,8 @@ type Model struct {
 	noteInput       string
 	composing       bool // capturing a message to send into the selected agent's pane
 	composeInput    string
+	showHelp        bool   // show the keyboard-shortcuts popup
+	helpOffset      int    // first visible keyboard-help entry
 	notice          string // brief, self-clearing status line (e.g. "sent to <pane>")
 
 	confirmingKill bool // "kill <pane>? y to confirm" — any other key cancels
@@ -97,15 +100,18 @@ func New() Model {
 		preferencesPath:  path,
 		stacked:          prefs.Stacked,
 		hideDetail:       prefs.HideDetail,
+		flatView:         prefs.FlatView,
 		acknowledged:     map[string]bool{},
 		dismissed:        map[string]bool{},
 	}
 }
 
 func (m Model) persistViewPreferences() {
+
 	saveViewPreferences(m.preferencesPath, viewPreferences{
 		Stacked:    m.stacked,
 		HideDetail: m.hideDetail,
+		FlatView:   m.flatView,
 	})
 }
 
@@ -283,6 +289,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.showHelp {
+		switch msg.String() {
+		case "?", "esc":
+			m.showHelp = false
+			m.helpOffset = 0
+		case "j", "down":
+			m.moveHelp(1)
+		case "k", "up":
+			m.moveHelp(-1)
+		}
+		return m, nil
+	}
+
 	// A first note on an omp or Claude pane can be prefilled from its tmux
 	// title (for example, "π: fix student-search dropdown"). y or enter
 	// accepts the suggestion, n opens a blank editor, and esc cancels the
@@ -390,9 +409,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sel = n - 1
 		}
 	case "J":
-		m.moveProject(1)
+		if !m.flatView {
+			m.moveProject(1)
+		}
 	case "K":
-		m.moveProject(-1)
+		if !m.flatView {
+			m.moveProject(-1)
+		}
 	case "/":
 		m.filtering = true
 	case "i":
@@ -449,6 +472,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		m.showDone = !m.showDone
 		m.rebuildRows()
+	case "p":
+		m.flatView = !m.flatView
+		m.persistViewPreferences()
+		m.rebuildRows()
+	case "?":
+		m.showHelp = true
+		m.helpOffset = 0
 	case "enter":
 		if a := m.selectedAgent(); a != nil {
 			if action := actionFor(a); action != nil {
@@ -639,6 +669,13 @@ func hiddenByDefault(l collect.Lifecycle) bool {
 	return l == collect.LifeDone || l == collect.LifeStopped
 }
 
+func flatActivityTime(a *collect.Agent) time.Time {
+	if !a.ProcessStartedAt.IsZero() {
+		return a.ProcessStartedAt
+	}
+	return a.UpdatedAt
+}
+
 type visibleProject struct {
 	project *collect.Project
 	agents  []*collect.Agent
@@ -720,44 +757,86 @@ func (m *Model) rebuildRows() {
 			}
 			matched = append(matched, a)
 		}
-		sort.SliceStable(matched, func(i, j int) bool {
-			if !matched[i].StatusChangedAt.Equal(matched[j].StatusChangedAt) {
-				return matched[i].StatusChangedAt.After(matched[j].StatusChangedAt)
-			}
-			return visibleAgentRank(matched[i], m.acknowledged) <
-				visibleAgentRank(matched[j], m.acknowledged)
-		})
+		if !m.flatView {
+			sort.SliceStable(matched, func(i, j int) bool {
+				if !matched[i].StatusChangedAt.Equal(matched[j].StatusChangedAt) {
+					return matched[i].StatusChangedAt.After(matched[j].StatusChangedAt)
+				}
+				return visibleAgentRank(matched[i], m.acknowledged) <
+					visibleAgentRank(matched[j], m.acknowledged)
+			})
+		}
 		if len(matched) > 0 {
 			visible = append(visible, visibleProject{project: p, agents: matched})
 		}
 	}
-	sort.SliceStable(visible, func(i, j int) bool {
-		ri, ci := visibleProjectAttention(visible[i].agents, m.acknowledged)
-		rj, cj := visibleProjectAttention(visible[j].agents, m.acknowledged)
-		if ri != rj {
-			return ri < rj
-		}
-		if ci != cj {
-			return ci > cj
-		}
-		li := visibleProjectLatest(visible[i].agents, m.acknowledged, ri)
-		lj := visibleProjectLatest(visible[j].agents, m.acknowledged, rj)
-		if !li.Equal(lj) {
-			return li.After(lj)
-		}
-		return visible[i].project.Key < visible[j].project.Key
-	})
-	for _, vp := range visible {
-		working := 0
-		for _, a := range vp.agents {
-			if a.Life == collect.LifeWorking {
-				working++
+	if m.flatView {
+		flat := make([]row, 0, len(m.snap.Agents))
+		for _, vp := range visible {
+			for _, a := range vp.agents {
+				flat = append(flat, row{kind: rowAgent, project: vp.project, agent: a})
 			}
 		}
-		m.rows = append(m.rows, row{kind: rowHeader, project: vp.project, working: working})
-		for _, a := range vp.agents {
+		sort.SliceStable(flat, func(i, j int) bool {
+			if !flat[i].agent.StatusChangedAt.Equal(flat[j].agent.StatusChangedAt) {
+				return flat[i].agent.StatusChangedAt.After(flat[j].agent.StatusChangedAt)
+			}
+			activityI := flatActivityTime(flat[i].agent)
+			activityJ := flatActivityTime(flat[j].agent)
+			if !activityI.Equal(activityJ) {
+				return activityI.After(activityJ)
+			}
+			doneI := flat[i].agent.Life == collect.LifeDone
+			doneJ := flat[j].agent.Life == collect.LifeDone
+			if doneI != doneJ {
+				return doneI
+			}
+			rankI := visibleAgentRank(flat[i].agent, m.acknowledged)
+			rankJ := visibleAgentRank(flat[j].agent, m.acknowledged)
+			if rankI != rankJ {
+				return rankI < rankJ
+			}
+			if flat[i].project.Key != flat[j].project.Key {
+				return flat[i].project.Key < flat[j].project.Key
+			}
+			if flat[i].agent.Name != flat[j].agent.Name {
+				return flat[i].agent.Name < flat[j].agent.Name
+			}
+			return flat[i].agent.ID < flat[j].agent.ID
+		})
+		for _, r := range flat {
 			m.selRows = append(m.selRows, len(m.rows))
-			m.rows = append(m.rows, row{kind: rowAgent, project: vp.project, agent: a})
+			m.rows = append(m.rows, r)
+		}
+	} else {
+		sort.SliceStable(visible, func(i, j int) bool {
+			ri, ci := visibleProjectAttention(visible[i].agents, m.acknowledged)
+			rj, cj := visibleProjectAttention(visible[j].agents, m.acknowledged)
+			if ri != rj {
+				return ri < rj
+			}
+			if ci != cj {
+				return ci > cj
+			}
+			li := visibleProjectLatest(visible[i].agents, m.acknowledged, ri)
+			lj := visibleProjectLatest(visible[j].agents, m.acknowledged, rj)
+			if !li.Equal(lj) {
+				return li.After(lj)
+			}
+			return visible[i].project.Key < visible[j].project.Key
+		})
+		for _, vp := range visible {
+			working := 0
+			for _, a := range vp.agents {
+				if a.Life == collect.LifeWorking {
+					working++
+				}
+			}
+			m.rows = append(m.rows, row{kind: rowHeader, project: vp.project, working: working})
+			for _, a := range vp.agents {
+				m.selRows = append(m.selRows, len(m.rows))
+				m.rows = append(m.rows, row{kind: rowAgent, project: vp.project, agent: a})
+			}
 		}
 	}
 	if prevID != "" {

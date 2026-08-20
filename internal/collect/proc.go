@@ -6,15 +6,17 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // proc is one row of the process snapshot.
 type proc struct {
-	pid  int
-	ppid int
-	comm string  // short command name (basename of exec)
-	args string  // full argv
-	cpu  float64 // %CPU
+	pid       int
+	ppid      int
+	comm      string    // short command name (basename of exec)
+	args      string    // full argv
+	cpu       float64   // %CPU
+	startedAt time.Time // process start time, approximated from ps etimes
 }
 
 // procTable is a single `ps` snapshot plus a parent→children index, so tree
@@ -35,11 +37,14 @@ var aiTools = map[string]string{
 	"opencode.exe": "opencode",
 }
 
-// snapshotProcs runs one `ps` and builds an in-memory process tree.
+// snapshotProcs runs one ps and builds an in-memory process tree.
 func snapshotProcs() (*procTable, error) {
 	// -A all procs, -w wide, -o custom columns. comm before args so the fixed
-	// columns parse cleanly and args (which contains spaces) is last.
-	cmd := exec.Command("ps", "-Awwo", "pid=,ppid=,%cpu=,comm=,args=")
+	// columns parse cleanly and args (which contains spaces) is last. etime is
+	// a portable elapsed-time format on macOS and Linux; it gives interactive
+	// agents a real start-time fallback.
+	capturedAt := time.Now()
+	cmd := exec.Command("ps", "-Awwo", "pid=,ppid=,%cpu=,etime=,comm=,args=")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -48,28 +53,78 @@ func snapshotProcs() (*procTable, error) {
 	sc := bufio.NewScanner(strings.NewReader(string(out)))
 	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for sc.Scan() {
-		line := strings.TrimLeft(sc.Text(), " ")
-		if line == "" {
+		p, ok := parseProcLine(sc.Text(), capturedAt)
+		if !ok {
 			continue
 		}
-		// Split off the three leading numeric/float fields, keep the rest.
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-		pid, err1 := strconv.Atoi(fields[0])
-		ppid, err2 := strconv.Atoi(fields[1])
-		cpu, _ := strconv.ParseFloat(fields[2], 64)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		comm := fields[3]
-		// args is everything after the first 4 whitespace-separated fields.
-		args := trimNFields(line, 4)
-		t.byPID[pid] = proc{pid: pid, ppid: ppid, comm: comm, args: args, cpu: cpu}
-		t.children[ppid] = append(t.children[ppid], pid)
+		t.byPID[p.pid] = p
+		t.children[p.ppid] = append(t.children[p.ppid], p.pid)
 	}
 	return t, sc.Err()
+}
+
+func parseProcLine(line string, capturedAt time.Time) (proc, bool) {
+	line = strings.TrimLeft(line, " ")
+	if line == "" {
+		return proc{}, false
+	}
+	// Split off the four leading numeric/float fields plus comm, keeping args
+	// (which can contain spaces) intact.
+	fields := strings.Fields(line)
+	if len(fields) < 6 {
+		return proc{}, false
+	}
+	pid, err1 := strconv.Atoi(fields[0])
+	ppid, err2 := strconv.Atoi(fields[1])
+	cpu, _ := strconv.ParseFloat(fields[2], 64)
+	if err1 != nil || err2 != nil {
+		return proc{}, false
+	}
+	var startedAt time.Time
+	if elapsed, ok := parseElapsed(fields[3]); ok {
+		startedAt = capturedAt.Add(-elapsed)
+	}
+	return proc{
+		pid: pid, ppid: ppid, comm: fields[4], args: trimNFields(line, 5), cpu: cpu, startedAt: startedAt,
+	}, true
+}
+
+// parseElapsed parses the ps etime forms [[dd-]hh:]mm:ss used by macOS and
+// Linux. Invalid external data remains an unavailable timestamp.
+func parseElapsed(value string) (time.Duration, bool) {
+	days := int64(0)
+	hasDays := false
+	if before, after, ok := strings.Cut(value, "-"); ok {
+		var err error
+		days, err = strconv.ParseInt(before, 10, 64)
+		if err != nil || days < 0 {
+			return 0, false
+		}
+		hasDays = true
+		value = after
+	}
+	parts := strings.Split(value, ":")
+	if len(parts) < 2 || len(parts) > 3 || (hasDays && len(parts) != 3) {
+		return 0, false
+	}
+	values := make([]int64, len(parts))
+	for i, part := range parts {
+		n, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || n < 0 {
+			return 0, false
+		}
+		values[i] = n
+	}
+	var hours, minutes, seconds int64
+	if len(values) == 3 {
+		hours, minutes, seconds = values[0], values[1], values[2]
+	} else {
+		minutes, seconds = values[0], values[1]
+	}
+	if minutes >= 60 || seconds >= 60 {
+		return 0, false
+	}
+	return time.Duration(days*24*60*60+hours*60*60+minutes*60+seconds) * time.Second, true
 }
 
 // trimNFields returns the substring of line after the first n whitespace fields.

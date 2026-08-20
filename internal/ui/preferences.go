@@ -9,6 +9,7 @@ import (
 type viewPreferences struct {
 	Stacked    bool `json:"stacked"`
 	HideDetail bool `json:"hide_detail"`
+	FlatView   bool `json:"flat_view"`
 }
 
 func defaultPreferencesPath() string {

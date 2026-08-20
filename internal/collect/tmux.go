@@ -97,23 +97,24 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 			life = LifeInput
 		}
 		agents = append(agents, Agent{
-			ID:         pn.paneID,
-			Window:     pn.window,
-			Kind:       KindInteractive,
-			Tool:       tool,
-			Name:       pn.target,
-			Life:       life,
-			State:      "live",
-			Detail:     titleOrCmd(pn.title, ap),
-			CWD:        pn.path,
-			Project:    projectKey(pn.path),
-			TmuxTarget: pn.target,
-			Session:    pn.session,
-			PaneTitle:  pn.title,
-			PID:        ap.pid,
-			CPU:        procs.subtreeCPU(ap.pid),
-			Preview:    preview,
-			NeedsInput: needsInput,
+			ID:               pn.paneID,
+			Window:           pn.window,
+			Kind:             KindInteractive,
+			Tool:             tool,
+			Name:             pn.target,
+			Life:             life,
+			State:            "live",
+			Detail:           titleOrCmd(pn.title, ap),
+			CWD:              pn.path,
+			Project:          projectKey(pn.path),
+			ProcessStartedAt: ap.startedAt,
+			TmuxTarget:       pn.target,
+			Session:          pn.session,
+			PaneTitle:        pn.title,
+			PID:              ap.pid,
+			CPU:              procs.subtreeCPU(ap.pid),
+			Preview:          preview,
+			NeedsInput:       needsInput,
 		})
 	}
 	return agents, nil
@@ -212,6 +213,7 @@ func looksLikeChoicePrompt(tool string, lines []string) bool {
 //     (~/.local/share/claude/versions/2.1.228) are ["◐","◑"] and
 //     ["◐","◓","◑","◒"], and live panes carrying these glyphs were the only
 //     ones with an active token counter in the body.
+//
 // DO NOT add the star family (✳ U+2733, ✶ U+2736, ✻ U+273B, ✽ U+273D,
 // ✢ U+2722) here. Claude Code 2.1.228 puts ✳ at the front of the pane title
 // while the agent sits at an empty prompt — it is an IDLE marker, the exact

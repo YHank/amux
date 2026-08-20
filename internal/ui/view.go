@@ -10,13 +10,40 @@ import (
 	"github.com/kyhan/amux/internal/collect"
 )
 
+type helpEntry struct {
+	key         string
+	description string
+}
+
+var keyboardHelpEntries = []helpEntry{
+	{"j / k", "move selection"},
+	{"J / K", "move projects in grouped view"},
+	{"g / G", "jump to first / last"},
+	{"enter", "attach a pane or manage a live Claude agent"},
+	{"c", "send text to the selected interactive pane"},
+	{"x", "kill an interactive pane or dismiss a background agent"},
+	{"y", "confirm a pending pane kill"},
+	{"/", "filter agents"},
+	{"i", "add or edit a note"},
+	{"a", "acknowledge the selected error"},
+	{"d", "show or hide history"},
+	{"p", "toggle project-grouped and flat views"},
+	{"r", "refresh now"},
+	{"v", "toggle side-by-side and stacked layout"},
+	{"m", "show or hide the detail preview"},
+	{"q", "quit"},
+}
+
 // View renders the whole dashboard.
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading amux…"
 	}
-	if m.height < 5 || m.width < 20 {
+	if m.height < 5 || m.width < 20 || (m.showHelp && m.height < 6) {
 		return m.renderTooSmall()
+	}
+	if m.showHelp {
+		return m.renderHelpPopup()
 	}
 	if m.loading && len(m.snap.Agents) == 0 {
 		return "scanning for AI agents…"
@@ -60,6 +87,72 @@ func (m Model) renderTooSmall() string {
 		lines = append(lines, truncateWidth("terminal too small", m.width))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) helpPageSize() int {
+	pageSize := m.height - 5 // border, title, range, and close hint
+	if pageSize < 1 {
+		return 1
+	}
+	return pageSize
+}
+
+func (m *Model) moveHelp(d int) {
+	maxOffset := len(keyboardHelpEntries) - m.helpPageSize()
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	m.helpOffset += d
+	if m.helpOffset < 0 {
+		m.helpOffset = 0
+	}
+	if m.helpOffset > maxOffset {
+		m.helpOffset = maxOffset
+	}
+}
+
+func (m Model) renderHelpPopup() string {
+	pageSize := m.helpPageSize()
+	maxOffset := len(keyboardHelpEntries) - pageSize
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	offset := m.helpOffset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+	end := offset + pageSize
+	if end > len(keyboardHelpEntries) {
+		end = len(keyboardHelpEntries)
+	}
+
+	panelWidth := m.width - 2
+	rowWidth := m.width - 6
+	title := "Keyboard shortcuts"
+	closeHint := "j/k scroll · ? / esc close"
+	if m.width < 40 {
+		title = "Keys"
+		closeHint = "j/k · ?/esc"
+	}
+	rows := make([]string, 0, end-offset)
+	for _, entry := range keyboardHelpEntries[offset:end] {
+		row := styleDetailKey.Render(fmt.Sprintf("%-11s", entry.key)) + entry.description
+		rows = append(rows, truncateWidth(row, rowWidth))
+	}
+	content := styleTitle.Render(title) + "\n" +
+		strings.Join(rows, "\n") + "\n" +
+		styleFaint.Render(fmt.Sprintf("%d-%d / %d", offset+1, end, len(keyboardHelpEntries))) + "\n" +
+		styleFaint.Render(closeHint)
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(cAccent).
+		Padding(0, 1).
+		Width(panelWidth).
+		Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel)
 }
 
 func (m Model) renderStackedBody(header, footer string, bodyH int) string {
@@ -167,28 +260,7 @@ func (m Model) renderFooter() string {
 	if m.filtering {
 		return truncateWidth(styleTitle.Render("/")+m.filter+styleFaint.Render("▏  (enter to apply · esc to clear)"), m.width)
 	}
-	historyKey := "d history"
-	if m.hidden > 0 && !m.showDone {
-		historyKey = fmt.Sprintf("d +%d hidden", m.hidden)
-	} else if m.showDone {
-		historyKey = "d hide history"
-	}
-	keys := []string{"j/k move", "J/K project"}
-	a := m.selectedAgent()
-	switch {
-	case a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "":
-		keys = append(keys, "enter attach", "c send", "x kill")
-	case a != nil && a.Kind == collect.KindBackground:
-		if a.Tool == "claude" && a.Live {
-			keys = append(keys, "enter agents")
-		}
-		keys = append(keys, "x dismiss")
-	}
-	keys = append(keys, "/ filter", "i note")
-	if a != nil && a.Life == collect.LifeError {
-		keys = append(keys, "a acknowledge")
-	}
-	keys = append(keys, historyKey, "v layout", "m preview", "q quit")
+	keys := []string{"j/k move", "? help", "q quit"}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
 	switch {
@@ -251,7 +323,7 @@ func (m Model) renderList(w, h int) string {
 			b.WriteString(m.renderProjectHeader(r.project, r.working, w))
 		} else {
 			selected := m.sel < len(m.selRows) && m.selRows[m.sel] == i
-			b.WriteString(m.renderAgentRow(r.agent, w, selected, now))
+			b.WriteString(m.renderAgentRow(r.agent, r.project, w, selected, now))
 		}
 		b.WriteByte('\n')
 	}
@@ -267,7 +339,7 @@ func (m Model) renderProjectHeader(p *collect.Project, working, w int) string {
 	return truncateWidth(name+wk, w)
 }
 
-func (m Model) renderAgentRow(a *collect.Agent, w int, selected bool, now time.Time) string {
+func (m Model) renderAgentRow(a *collect.Agent, p *collect.Project, w int, selected bool, now time.Time) string {
 	glyph := lipgloss.NewStyle().Foreground(lifeColor(a.Life)).Render(lifeGlyph(a.Life))
 	kind := styleFaint.Render(kindGlyph(a.Kind))
 
@@ -275,7 +347,7 @@ func (m Model) renderAgentRow(a *collect.Agent, w int, selected bool, now time.T
 	if selected {
 		nameStyle = styleSel
 	}
-	name := renderAgentRowName(a, nameStyle, selected)
+	name := m.renderAgentRowName(a, p, nameStyle, selected)
 
 	// Right-aligned meta: model + tokens/cpu + age.
 	meta := agentMeta(a, now)
@@ -315,8 +387,11 @@ func agentRowName(a *collect.Agent) string {
 	return tool + " · " + name
 }
 
-func renderAgentRowName(a *collect.Agent, style lipgloss.Style, selected bool) string {
+func (m Model) renderAgentRowName(a *collect.Agent, p *collect.Project, style lipgloss.Style, selected bool) string {
 	name := agentRowName(a)
+	if m.flatView && p != nil && p.Name != "" {
+		name = p.Name + " · " + name
+	}
 	if a.Kind != collect.KindInteractive || a.Session == "" || a.Window == "" {
 		return style.Render(name)
 	}

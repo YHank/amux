@@ -136,9 +136,11 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `i` | Add / edit a note; for a first interactive OMP or Claude note, choose whether to prefill its tmux task title |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
 | `d` | Show / hide completed, stopped, and acknowledged-error history |
+| `p` | Toggle project-grouped and flat project-prefixed views; latest status changes sort first in the flat view |
 | `r` | Refresh now |
 | `v` | Toggle the list/detail panes between side-by-side and top/bottom layouts |
 | `m` | Show / hide the detail and terminal-preview pane |
+| `?` | Show keyboard shortcuts; press `?` or `Esc` to close |
 | `q` | Quit |
 
 ### tmux status bar

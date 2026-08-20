@@ -58,6 +58,210 @@ func TestProjectNavigationMovesBetweenVisibleProjects(t *testing.T) {
 	}
 }
 
+func TestProjectViewToggleFlattensAndPrefixesAgentNames(t *testing.T) {
+	a := collect.Agent{ID: "a", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/alpha", Name: "worker"}
+	b := collect.Agent{ID: "b", Kind: collect.KindBackground, Life: collect.LifeIdle, Project: "/beta", Name: "reviewer"}
+	m := Model{
+		snap: collect.Snapshot{
+			Projects: []collect.Project{
+				{Key: "/alpha", Name: "alpha", Agents: []collect.Agent{a}},
+				{Key: "/beta", Name: "beta", Agents: []collect.Agent{b}},
+			},
+			Agents: []collect.Agent{a, b},
+		},
+		width: 120,
+	}
+	m.rebuildRows()
+	if len(m.rows) != 4 || m.rows[0].kind != rowHeader {
+		t.Fatalf("grouped rows = %#v, want project headers and agents", m.rows)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = next.(Model)
+	if !m.flatView {
+		t.Fatal("p did not enable flat view")
+	}
+	for _, r := range m.rows {
+		if r.kind == rowHeader {
+			t.Fatalf("flat view retained project header: %#v", r)
+		}
+	}
+	list := m.renderList(120, 12)
+	for _, name := range []string{"alpha · worker", "beta · reviewer"} {
+		if !strings.Contains(list, name) {
+			t.Errorf("flat list = %q, missing project-prefixed name %q", list, name)
+		}
+	}
+	if strings.Contains(m.renderFooter(), "J/K project") {
+		t.Errorf("flat footer still advertises project navigation: %q", m.renderFooter())
+	}
+
+	m.sel = 1
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	if got := next.(Model).sel; got != 1 {
+		t.Errorf("J moved selection in flat view to %d, want 1", got)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = next.(Model)
+	if m.flatView || len(m.rows) != 4 || m.rows[0].kind != rowHeader {
+		t.Errorf("second p did not restore grouped view: flat=%v rows=%#v", m.flatView, m.rows)
+	}
+}
+
+func TestFlatViewOrdersByStatusChangeRecency(t *testing.T) {
+	now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name             string
+		doneChangedAt    time.Time
+		workingChangedAt time.Time
+		wantFirstAgentID string
+	}{
+		{
+			name:             "newer working agent",
+			doneChangedAt:    now.Add(-time.Minute),
+			workingChangedAt: now,
+			wantFirstAgentID: "working",
+		},
+		{
+			name:             "newer completed agent",
+			doneChangedAt:    now,
+			workingChangedAt: now.Add(-time.Minute),
+			wantFirstAgentID: "done",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			done := collect.Agent{
+				ID: "done", Kind: collect.KindBackground, Life: collect.LifeDone,
+				Project: "/alpha", Name: "done", StatusChangedAt: tc.doneChangedAt,
+			}
+			working := collect.Agent{
+				ID: "working", Kind: collect.KindBackground, Life: collect.LifeWorking,
+				Project: "/beta", Name: "working", StatusChangedAt: tc.workingChangedAt,
+			}
+			m := Model{
+				snap: collect.Snapshot{
+					Projects: []collect.Project{
+						{Key: "/alpha", Name: "alpha", Agents: []collect.Agent{done}},
+						{Key: "/beta", Name: "beta", Agents: []collect.Agent{working}},
+					},
+					Agents: []collect.Agent{done, working},
+				},
+				showDone: true,
+			}
+			m.rebuildRows()
+			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+			m = next.(Model)
+
+			if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != tc.wantFirstAgentID {
+				t.Errorf("first flat agent = %#v, want %q", got, tc.wantFirstAgentID)
+			}
+		})
+	}
+}
+
+func TestFlatViewUsesProcessStartWhenStatusChangesTie(t *testing.T) {
+	now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+	older := collect.Agent{
+		ID: "older", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/alpha", Name: "older", StatusChangedAt: now, ProcessStartedAt: now.Add(-time.Hour),
+	}
+	newer := collect.Agent{
+		ID: "newer", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/beta", Name: "newer", StatusChangedAt: now, ProcessStartedAt: now.Add(-time.Minute),
+	}
+	m := Model{
+		snap: collect.Snapshot{
+			Projects: []collect.Project{
+				{Key: "/alpha", Name: "alpha", Agents: []collect.Agent{older}},
+				{Key: "/beta", Name: "beta", Agents: []collect.Agent{newer}},
+			},
+			Agents: []collect.Agent{older, newer},
+		},
+		flatView: true,
+	}
+	m.rebuildRows()
+	if got := m.rows[m.selRows[0]].agent; got == nil || got.ID != "newer" {
+		t.Errorf("first flat agent = %#v, want newer activity", got)
+	}
+}
+
+func TestKeyboardHelpPopupAndCompactFooter(t *testing.T) {
+	m := Model{width: 100, height: 30}
+	footer := m.renderFooter()
+	for _, key := range []string{"j/k move", "? help", "q quit"} {
+		if !strings.Contains(footer, key) {
+			t.Errorf("compact footer = %q, missing %q", footer, key)
+		}
+	}
+	if strings.Contains(footer, "d history") || strings.Contains(footer, "v layout") {
+		t.Errorf("compact footer retained extended shortcuts: %q", footer)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(Model)
+	if !m.showHelp {
+		t.Fatal("? did not open keyboard help")
+	}
+	help := m.View()
+	for _, text := range []string{"Keyboard shortcuts", "p", "toggle project-grouped and flat views", "j/k scroll · ? / esc close"} {
+		if !strings.Contains(help, text) {
+			t.Errorf("keyboard help = %q, missing %q", help, text)
+		}
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if next.(Model).showHelp {
+		t.Fatal("esc did not close keyboard help")
+	}
+}
+
+func TestKeyboardHelpScrollsWithinSmallTerminal(t *testing.T) {
+	m := Model{width: 60, height: 12}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(Model)
+	help := m.View()
+	if !strings.Contains(help, "Keyboard shortcuts") || !strings.Contains(help, "1-7 / 16") {
+		t.Fatalf("first help page = %q", help)
+	}
+	lines := strings.Split(help, "\n")
+	if len(lines) > m.height {
+		t.Fatalf("help height = %d, want at most %d", len(lines), m.height)
+	}
+	for _, line := range lines {
+		if got := lipgloss.Width(line); got > m.width {
+			t.Fatalf("help line width = %d, want at most %d: %q", got, m.width, line)
+		}
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = next.(Model)
+	if m.helpOffset != 1 {
+		t.Fatalf("help offset = %d, want 1 after j", m.helpOffset)
+	}
+	if help = m.View(); !strings.Contains(help, "2-8 / 16") {
+		t.Errorf("scrolled help page = %q", help)
+	}
+}
+
+func TestKeyboardHelpFitsNarrowTerminal(t *testing.T) {
+	m := Model{width: 20, height: 6}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = next.(Model)
+	help := m.View()
+	lines := strings.Split(help, "\n")
+	if len(lines) > m.height {
+		t.Fatalf("narrow help height = %d, want at most %d: %q", len(lines), m.height, help)
+	}
+	for _, line := range lines {
+		if got := lipgloss.Width(line); got > m.width {
+			t.Fatalf("narrow help line width = %d, want at most %d: %q", got, m.width, line)
+		}
+	}
+	if !strings.Contains(help, "j/k · ?/esc") {
+		t.Errorf("narrow help missing compact close hint: %q", help)
+	}
+}
+
 func TestDismissalUsesVisibleProjectWorkingCount(t *testing.T) {
 	dismissed := collect.Agent{
 		ID: "dismissed", Kind: collect.KindBackground, Life: collect.LifeWorking,
@@ -462,7 +666,7 @@ func TestRenderAgentRowIncludesWindowBeforeNote(t *testing.T) {
 	store.Set(agent.ID, "ship it")
 	m := Model{notesStore: store}
 
-	row := m.renderAgentRow(&agent, 120, false, time.Now())
+	row := m.renderAgentRow(&agent, nil, 120, false, time.Now())
 	nameAt, noteAt := strings.Index(row, "work » editor"), strings.Index(row, "» ship it")
 	if nameAt < 0 || noteAt < 0 || nameAt >= noteAt {
 		t.Errorf("row = %q, want window name before note", row)
@@ -554,21 +758,24 @@ func TestUnsupportedBackgroundEnterDoesNotQuit(t *testing.T) {
 	}
 }
 
-func TestFooterShowsSelectedAgentCapability(t *testing.T) {
+func TestKeyboardHelpShowsSelectedAgentCapabilities(t *testing.T) {
 	live := collect.Agent{
 		ID: "live", Kind: collect.KindBackground, Tool: "claude", Live: true,
 		Life: collect.LifeInput, Project: "/p", Name: "live",
 	}
-	m := Model{snap: projSnap(live), width: 200}
+	m := Model{snap: projSnap(live), width: 200, height: 30}
 	m.rebuildRows()
 	footer := m.renderFooter()
-	if !strings.Contains(footer, "enter agents") || strings.Contains(footer, "c send") {
-		t.Errorf("live background footer = %q", footer)
+	if !strings.Contains(footer, "? help") || strings.Contains(footer, "c send") {
+		t.Errorf("compact footer = %q", footer)
+	}
+	help := m.renderHelpPopup()
+	if !strings.Contains(help, "attach a pane or manage a live Claude agent") || !strings.Contains(help, "send text to the selected interactive pane") {
+		t.Errorf("keyboard help = %q", help)
 	}
 	if detail := m.renderDetail(100, 30); !strings.Contains(detail, "open Claude agents") {
 		t.Errorf("live background detail = %q", detail)
 	}
-
 }
 
 // TestComposeOnlyForInteractive verifies `c` is a no-op on a background agent
@@ -942,10 +1149,13 @@ func TestHeadlessXDismissesLocallyEvenInHistoryMode(t *testing.T) {
 		ID: "headless", Kind: collect.KindBackground, Tool: "omp",
 		Life: collect.LifeWorking, Project: "/p", Name: "headless",
 	}
-	m := Model{snap: projSnap(bg), width: 200}
+	m := Model{snap: projSnap(bg), width: 200, height: 30}
 	m.rebuildRows()
-	if footer := m.renderFooter(); !strings.Contains(footer, "x dismiss") {
-		t.Fatalf("background footer missing dismiss shortcut: %q", footer)
+	if footer := m.renderFooter(); !strings.Contains(footer, "? help") || strings.Contains(footer, "x dismiss") {
+		t.Fatalf("compact footer = %q", footer)
+	}
+	if help := m.renderHelpPopup(); !strings.Contains(help, "dismiss a background agent") {
+		t.Fatalf("keyboard help missing dismiss shortcut: %q", help)
 	}
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
@@ -1090,7 +1300,13 @@ func TestViewTogglesPersistState(t *testing.T) {
 	if !m.hideDetail {
 		t.Fatal("m should hide the detail pane")
 	}
-	if got, want := loadViewPreferences(path), (viewPreferences{Stacked: true, HideDetail: true}); got != want {
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = next.(Model)
+	if !m.flatView {
+		t.Fatal("p should enable flat project view")
+	}
+	if got, want := loadViewPreferences(path), (viewPreferences{Stacked: true, HideDetail: true, FlatView: true}); got != want {
 		t.Fatalf("saved preferences = %#v, want %#v", got, want)
 	}
 }

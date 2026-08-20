@@ -77,6 +77,35 @@ func TestTrimNFields(t *testing.T) {
 	}
 }
 
+func TestParseProcLineUsesElapsedTimeForProcessStart(t *testing.T) {
+	capturedAt := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+	p, ok := parseProcLine("123 1 2.5 01:30 claude claude --cwd /tmp/project", capturedAt)
+	if !ok {
+		t.Fatal("parseProcLine returned false for a complete process row")
+	}
+	if p.pid != 123 || p.ppid != 1 || p.cpu != 2.5 || p.comm != "claude" || p.args != "claude --cwd /tmp/project" {
+		t.Errorf("parseProcLine() = %#v, want parsed process fields", p)
+	}
+	if want := capturedAt.Add(-90 * time.Second); !p.startedAt.Equal(want) {
+		t.Errorf("startedAt = %v, want %v", p.startedAt, want)
+	}
+
+	if elapsed, ok := parseElapsed("2-03:04:05"); !ok || elapsed != 51*time.Hour+4*time.Minute+5*time.Second {
+		t.Errorf("parseElapsed() = %v, %v; want 51h4m5s, true", elapsed, ok)
+	}
+	if _, ok := parseElapsed("1-02:03"); ok {
+		t.Error("parseElapsed accepted a day-prefixed elapsed time without hours")
+	}
+
+	p, ok = parseProcLine("123 1 2.5 unknown claude claude", capturedAt)
+	if !ok {
+		t.Fatal("parseProcLine rejected a process row with an unavailable elapsed time")
+	}
+	if !p.startedAt.IsZero() {
+		t.Errorf("startedAt = %v, want zero for invalid elapsed time", p.startedAt)
+	}
+}
+
 func TestNormalizeLife(t *testing.T) {
 	cases := []struct {
 		state string
