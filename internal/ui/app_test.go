@@ -708,15 +708,15 @@ func TestSelectionAnchorsAcrossRefresh(t *testing.T) {
 	}
 }
 
-// TestSelectionClampsWhenSelectedAgentVanishes verifies a sane fallback when the
-// very agent under the cursor disappears.
+// TestSelectionClampsWhenSelectedAgentVanishes verifies that deleting the last
+// selected row falls back to the prior remaining agent.
 func TestSelectionClampsWhenSelectedAgentVanishes(t *testing.T) {
 	m := Model{snap: projSnap(
 		mkAgent("a", collect.LifeWorking),
 		mkAgent("b", collect.LifeWorking),
 	)}
 	m.rebuildRows()
-	m.sel = 1 // "b"
+	m.sel = 1 // select "b"
 
 	// "b" finishes and is hidden; only "a" remains visible.
 	m.snap = projSnap(
@@ -726,24 +726,27 @@ func TestSelectionClampsWhenSelectedAgentVanishes(t *testing.T) {
 	m.rebuildRows()
 
 	if got := m.selectedAgent(); got == nil || got.ID != "a" {
-		t.Errorf("after selected agent vanished, selected %v, want a (clamped)", got)
+		t.Errorf("after final agent vanished, selected %v, want a", got)
 	}
 }
 
-func TestSelectionResetsWhenMiddleAgentVanishes(t *testing.T) {
+func TestSelectionMovesToPredecessorWhenMiddleAgentVanishes(t *testing.T) {
 	m := Model{snap: projSnap(
 		mkAgent("a", collect.LifeWorking),
 		mkAgent("b", collect.LifeWorking),
 		mkAgent("c", collect.LifeWorking),
 	)}
 	m.rebuildRows()
-	m.sel = 1 // "b"
+	m.sel = 1 // select "b"
+
+	// "b" finishes and disappears; selection moves back one row to "a".
 	m.snap = projSnap(
 		mkAgent("a", collect.LifeWorking),
 		mkAgent("b", collect.LifeDone),
 		mkAgent("c", collect.LifeWorking),
 	)
 	m.rebuildRows()
+
 	if got := m.selectedAgent(); got == nil || got.ID != "a" {
 		t.Errorf("after middle agent vanished, selected %v, want a", got)
 	}
@@ -1840,6 +1843,58 @@ func TestKillConfirmRequiresY(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("y should trigger the kill command")
+	}
+}
+
+// TestInteractiveKillSelectsPreviousPane exercises the complete x/y kill flow,
+// including the asynchronous success message, and moves selection back one row.
+func TestInteractiveKillSelectsPreviousPane(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		selected int
+		want     string
+	}{
+		{name: "middle selects predecessor", selected: 1, want: "a"},
+		{name: "final selects predecessor", selected: 2, want: "b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agents := []collect.Agent{
+				{ID: "a", Kind: collect.KindInteractive, Life: collect.LifeWorking, Project: "/p", Name: "a", TmuxTarget: "sess:0.0"},
+				{ID: "b", Kind: collect.KindInteractive, Life: collect.LifeWorking, Project: "/p", Name: "b", TmuxTarget: "sess:0.1"},
+				{ID: "c", Kind: collect.KindInteractive, Life: collect.LifeWorking, Project: "/p", Name: "c", TmuxTarget: "sess:0.2"},
+			}
+			m := Model{snap: projSnap(agents...)}
+			m.rebuildRows()
+			m.sel = tc.selected
+			target := m.selectedAgent()
+			if target == nil {
+				t.Fatal("precondition: selected interactive agent is nil")
+			}
+
+			next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+			m = next.(Model)
+			if !m.confirmingKill || m.killTarget != target.TmuxTarget || m.killName != target.Name {
+				t.Fatalf("x armed kill for target=%q name=%q, want target=%q name=%q", m.killTarget, m.killName, target.TmuxTarget, target.Name)
+			}
+			if cmd != nil {
+				t.Fatal("x should only arm confirmation")
+			}
+
+			next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+			m = next.(Model)
+			if cmd == nil {
+				t.Fatal("y should emit the kill command")
+			}
+
+			next, cmd = m.Update(killedMsg{target: target.TmuxTarget, name: target.Name})
+			m = next.(Model)
+			if cmd != nil {
+				t.Fatal("successful kill should not emit a follow-up command")
+			}
+			if got := m.selectedAgent(); got == nil || got.ID != tc.want {
+				t.Fatalf("selected agent after killing %q = %#v, want %q", target.ID, got, tc.want)
+			}
+		})
 	}
 }
 

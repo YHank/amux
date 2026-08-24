@@ -930,6 +930,7 @@ func (m *Model) rebuildRows() {
 	// refresh — otherwise an agent finishing (and vanishing) or a new one
 	// appearing would shift every row and silently move the selection to a
 	// different agent, exactly when the user is watching a transition.
+	prevSel := m.sel
 	prevID := ""
 	if a := m.selectedAgent(); a != nil {
 		prevID = a.ID
@@ -1131,7 +1132,7 @@ func (m *Model) rebuildRows() {
 			}
 		}
 		if !found {
-			m.sel = 0
+			m.sel = prevSel - 1
 		}
 	}
 	if m.sel >= len(m.selRows) {
