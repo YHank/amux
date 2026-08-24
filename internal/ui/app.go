@@ -65,6 +65,7 @@ type Model struct {
 	hideDetail             bool            // hide the detail pane so the list fills the viewport
 	currentDir             string          // launch directory; its project leads the flat view among agents with no remembered position
 	currentProjectKey      string          // deepest visible project containing currentDir
+	startupPaneID          string          // interactive pane to select after the first successful snapshot
 	flatOrder              []string        // agent IDs in the order the flat view last displayed them
 	groupedOrder           []string        // agent IDs in the order the grouped view last displayed them
 	rememberedRank         map[string]int  // active view's remembered order, as positions
@@ -113,6 +114,7 @@ func New() Model {
 		lastNotesRefresh: time.Now(),
 		preferencesPath:  path,
 		currentDir:       currentDir,
+		startupPaneID:    strings.TrimSpace(os.Getenv("AMUX_START_PANE")),
 		stacked:          prefs.Stacked,
 		hideDetail:       prefs.HideDetail,
 		flatView:         prefs.FlatView,
@@ -121,6 +123,9 @@ func New() Model {
 		persisted:        prefs,
 		acknowledged:     map[string]bool{},
 		dismissed:        map[string]bool{},
+	}
+	if m.startupPaneID == "" {
+		m.startupPaneID = strings.TrimSpace(os.Getenv("TMUX_PANE"))
 	}
 	m.refreshRememberedRank()
 	return m
@@ -267,6 +272,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pruneAcknowledged()
 		m.pruneDismissed()
 		m.rebuildRows()
+		if m.startupPaneID != "" {
+			for i, ri := range m.selRows {
+				if a := m.rows[ri].agent; a != nil && a.Kind == collect.KindInteractive && a.ID == m.startupPaneID {
+					m.sel = i
+					break
+				}
+			}
+			m.startupPaneID = ""
+		}
 		m.persistViewPreferences()
 		if m.suggestingNote {
 			if a := m.selectedAgent(); a == nil || a.ID != m.suggestedNoteID {

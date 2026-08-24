@@ -677,6 +677,132 @@ func TestDismissalUsesVisibleProjectWorkingCount(t *testing.T) {
 	}
 }
 
+func TestStartupPaneSelectsMatchingInteractiveAgent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("TMUX_PANE", "%first")
+	t.Setenv("AMUX_START_PANE", " %target ")
+
+	first := collect.Agent{
+		ID: "%first", TmuxTarget: "%target", Kind: collect.KindInteractive,
+		Life: collect.LifeInput, Project: "/p", Name: "first",
+	}
+	target := collect.Agent{
+		ID: "%target", TmuxTarget: "session:0.1", Kind: collect.KindInteractive,
+		Life: collect.LifeWorking, Project: "/p", Name: "target",
+	}
+	m := New()
+	next, _ := m.Update(snapshotMsg{snap: projSnap(first, target)})
+	m = next.(Model)
+
+	if got := m.selectedAgent(); got == nil || got.ID != target.ID {
+		t.Fatalf("selected agent = %#v, want %q", got, target.ID)
+	}
+}
+
+func TestStartupPaneNoMatchKeepsDefaultSelection(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("AMUX_START_PANE", "")
+	t.Setenv("TMUX_PANE", "%missing")
+
+	first := collect.Agent{
+		ID: "%first", Kind: collect.KindInteractive,
+		Life: collect.LifeInput, Project: "/p", Name: "first",
+	}
+	other := collect.Agent{
+		ID: "%other", Kind: collect.KindInteractive,
+		Life: collect.LifeWorking, Project: "/p", Name: "other",
+	}
+	m := New()
+	next, _ := m.Update(snapshotMsg{snap: projSnap(first, other)})
+	m = next.(Model)
+
+	if got := m.selectedAgent(); got == nil || got.ID != first.ID {
+		t.Fatalf("selected agent = %#v, want default %q", got, first.ID)
+	}
+}
+
+func TestStartupPaneNoMatchConsumesOneShotSelection(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("TMUX_PANE", "%target")
+	t.Setenv("AMUX_START_PANE", "")
+
+	first := collect.Agent{
+		ID: "%first", Kind: collect.KindInteractive,
+		Life: collect.LifeInput, Project: "/p", Name: "first",
+	}
+	target := collect.Agent{
+		ID: "%target", Kind: collect.KindInteractive,
+		Life: collect.LifeWorking, Project: "/p", Name: "target",
+	}
+	m := New()
+	next, _ := m.Update(snapshotMsg{snap: projSnap(first)})
+	m = next.(Model)
+	next, _ = m.Update(snapshotMsg{snap: projSnap(first, target)})
+	m = next.(Model)
+
+	if got := m.selectedAgent(); got == nil || got.ID != first.ID {
+		t.Fatalf("second snapshot selected %#v, want default %q after initial no-match", got, first.ID)
+	}
+}
+
+func TestStartupPaneSelectionSurvivesFailedSnapshot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("TMUX_PANE", "%target")
+	t.Setenv("AMUX_START_PANE", "")
+
+	first := collect.Agent{
+		ID: "%first", Kind: collect.KindInteractive,
+		Life: collect.LifeInput, Project: "/p", Name: "first",
+	}
+	target := collect.Agent{
+		ID: "%target", Kind: collect.KindInteractive,
+		Life: collect.LifeWorking, Project: "/p", Name: "target",
+	}
+	m := New()
+	next, _ := m.Update(snapshotMsg{err: errors.New("collect failed")})
+	m = next.(Model)
+	next, _ = m.Update(snapshotMsg{snap: projSnap(first, target)})
+	m = next.(Model)
+
+	if got := m.selectedAgent(); got == nil || got.ID != target.ID {
+		t.Fatalf("successful snapshot selected %#v, want %q after failed snapshot", got, target.ID)
+	}
+}
+
+func TestStartupPaneSelectionDoesNotOverrideLaterNavigation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("TMUX_PANE", "%target")
+	t.Setenv("AMUX_START_PANE", "")
+
+	first := collect.Agent{
+		ID: "%first", Kind: collect.KindInteractive,
+		Life: collect.LifeInput, Project: "/p", Name: "first",
+	}
+	target := collect.Agent{
+		ID: "%target", Kind: collect.KindInteractive,
+		Life: collect.LifeWorking, Project: "/p", Name: "target",
+	}
+	m := New()
+	next, _ := m.Update(snapshotMsg{snap: projSnap(first, target)})
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m = next.(Model)
+	if got := m.selectedAgent(); got == nil || got.ID != first.ID {
+		t.Fatalf("navigation selected %#v, want %q", got, first.ID)
+	}
+
+	next, _ = m.Update(snapshotMsg{snap: projSnap(first, target)})
+	m = next.(Model)
+	if got := m.selectedAgent(); got == nil || got.ID != first.ID {
+		t.Fatalf("second snapshot selected %#v, want %q", got, first.ID)
+	}
+}
+
 // TestSelectionAnchorsAcrossRefresh verifies the cursor stays on the same agent
 // when an earlier agent finishes and drops out of the default (active) view,
 // instead of silently pointing at whatever now occupies the old row index.
