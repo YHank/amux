@@ -375,12 +375,21 @@ func (m Model) renderAgentRow(a *collect.Agent, p *collect.Project, w int, selec
 	return left + strings.Repeat(" ", gap) + metaR
 }
 
+// agentRowName is the label shown in the list. Interactive panes lead with the
+// agent tool so the row reads "claude (session) » window": the tmux session
+// name is often an opaque id and does not always match the tool running in
+// it (a claude pane inside an "omp-…" session), so the tool comes first and
+// the session follows in parentheses.
 func agentRowName(a *collect.Agent) string {
-	name := a.Name
-	if a.Kind == collect.KindInteractive && a.Session != "" && a.Window != "" {
-		name = a.Session + " » " + a.Window
-	}
 	tool := strings.TrimSpace(a.Tool)
+	if a.Kind == collect.KindInteractive && a.Session != "" && a.Window != "" {
+		name := a.Session
+		if tool != "" {
+			name = tool + " (" + a.Session + ")"
+		}
+		return name + " » " + a.Window
+	}
+	name := a.Name
 	if tool == "" || strings.Contains(strings.ToLower(name), strings.ToLower(tool)) {
 		return name
 	}
