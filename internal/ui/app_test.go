@@ -1339,6 +1339,51 @@ func TestSlashFilterMatchesSavedNotes(t *testing.T) {
 	}
 }
 
+func TestUppercaseIDeletesSelectedNote(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	store := notes.Load()
+	store.Set("agent", "release blocker")
+	m := Model{
+		snap:       projSnap(mkAgent("agent", collect.LifeWorking)),
+		notesStore: store,
+	}
+	m.rebuildRows()
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'I'}})
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatal("I should delete the note without starting an action")
+	}
+	if got := m.notesStore.Get("agent"); got != "" {
+		t.Errorf("note after I = %q, want empty", got)
+	}
+}
+
+func TestUppercaseIWithoutNoteIsNoOp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	m := Model{
+		snap:       projSnap(mkAgent("agent", collect.LifeWorking)),
+		notesStore: notes.Load(),
+	}
+	m.rebuildRows()
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'I'}})
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatal("I without a note should not start an action")
+	}
+	if got := m.notesStore.Get("agent"); got != "" {
+		t.Errorf("note after I without an existing note = %q, want empty", got)
+	}
+	if got := m.selectedAgent(); got == nil || got.ID != "agent" {
+		t.Errorf("selection after I without a note = %v, want agent", got)
+	}
+}
+
 func TestSlashFilterMatchesToolWhenPaneNameDiffers(t *testing.T) {
 	openCode := mkAgent("open", collect.LifeWorking)
 	openCode.Name = "omp-776820fb:3.0"

@@ -88,10 +88,11 @@ working right now, what's waiting on you, and what's done — grouped by project
   a refresh later. Grouped and flat layouts are remembered separately, and `p`
   brings each back as you left it.
 - **Your own notes, local to amux** — press `i` to jot a short note on any
-  agent (why it's running, what you're waiting on); saved to disk, shown in
-  the list and detail panel, never written back to tmux/Claude/omp. For a
-  first note on an interactive OMP or Claude pane, amux asks whether to
-  prefill the note from that pane's current tmux title (task name).
+  agent (why it's running, what you're waiting on), or `I` to delete its
+  existing note; notes are saved to disk, shown in the list and detail panel,
+  and never written back to tmux/Claude/omp. For a first note on an interactive
+  OMP or Claude pane, amux asks whether to prefill the note from that pane's
+  current tmux title (task name).
 - **Live detail** — model, tokens, CPU, age, and the original task for the
   selected agent.
 - **Attach or manage in a keystroke** — `Enter` switches to an interactive
@@ -149,7 +150,7 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `c` | Compose a message and send it into an interactive agent's pane |
 | `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
 | `/` | Filter by tool, name, project, model, path, status detail, or saved note |
-| `i` | Add / edit a note; for a first interactive OMP or Claude note, choose whether to prefill its tmux task title (leading `π:` / `π >` / spinner glyph stripped) |
+| `i` / `I` | Add / edit / delete a note; for a first interactive OMP or Claude note, choose whether to prefill its tmux task title (leading `π:` / `π >` / spinner glyph stripped) |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
 | `d` | Show / hide completed, stopped, and acknowledged-error history |
 | `p` | Toggle project-grouped and flat project-prefixed views; each remembers its own layout and restores it on entry, and both put the latest status change first |

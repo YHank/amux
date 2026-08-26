@@ -505,6 +505,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.namingAgentID = a.ID
 			m.naming = true
 		}
+	case "I":
+		if a := m.selectedAgent(); a != nil {
+			m.notesStore.Set(a.ID, "")
+			m.rebuildRows()
+		}
 	case "a":
 		if a := m.selectedAgent(); a != nil && a.Life == collect.LifeError {
 			if m.acknowledged == nil {

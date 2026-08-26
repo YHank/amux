@@ -24,7 +24,7 @@ var keyboardHelpEntries = []helpEntry{
 	{"x", "kill an interactive pane or dismiss a background agent"},
 	{"y", "confirm a pending pane kill"},
 	{"/", "filter agents"},
-	{"i", "add or edit a note"},
+	{"i / I", "add or edit / delete a note"},
 	{"a", "acknowledge the selected error"},
 	{"d", "show or hide history"},
 	{"p", "toggle project-grouped and flat views"},
