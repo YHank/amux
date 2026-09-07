@@ -91,7 +91,7 @@ working right now, what's waiting on you, and what's done — grouped by project
   agent (why it's running, what you're waiting on), or `I` to delete its
   existing note; notes are saved to disk, shown in the list and detail panel,
   and never written back to tmux/Claude/omp. For a first note on an interactive
-  OMP or Claude pane, amux asks whether to prefill the note from that pane's
+  OMP, Claude, or Codex pane, amux asks whether to prefill the note from that pane's
   current tmux title (task name).
 - **Live detail** — model, tokens, CPU, age, and the original task for the
   selected agent.

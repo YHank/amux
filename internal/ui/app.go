@@ -320,9 +320,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // noteSuggestion returns a prefill for a first note on an interactive pane
-// whose tool titles the pane after its current task: omp sets "π: <task>" and
-// Claude Code sets "<spinner glyph> <task>". Other tools and empty titles
-// yield no suggestion.
+// for omp, Claude Code, or Codex. Tool-specific status prefixes are removed
+// for omp and Claude Code; Codex titles are used as supplied.
 func noteSuggestion(a *collect.Agent) string {
 	if a == nil || a.Kind != collect.KindInteractive {
 		return ""
@@ -332,6 +331,8 @@ func noteSuggestion(a *collect.Agent) string {
 		return ""
 	}
 	switch a.Tool {
+	case "codex":
+		return title
 	case "omp", "claude":
 		// Both leading markers vary by version and state — omp has shipped
 		// both "π: <task>" and "π > <task>", and Claude Code's glyph is a
@@ -374,7 +375,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// A first note on an omp or Claude pane can be prefilled from its tmux
+	// A first note on an omp, Claude, or Codex pane can be prefilled from its tmux
 	// title (for example, "π: fix student-search dropdown"). y or enter
 	// accepts the suggestion, n opens a blank editor, and esc cancels the
 	// note request.

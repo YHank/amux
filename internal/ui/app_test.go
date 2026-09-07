@@ -1656,7 +1656,8 @@ func TestComposeEnterWithEmptyTextDoesNotSend(t *testing.T) {
 
 // TestNoteSuggestionByTool verifies which pane titles become note prefills:
 // omp drops its "π:" prefix, Claude Code drops its leading spinner glyph, and
-// other tools, empty titles, and non-interactive agents offer nothing.
+// Codex keeps its title, and other tools, empty titles, and non-interactive
+// agents offer nothing.
 func TestNoteSuggestionByTool(t *testing.T) {
 	interactive := func(tool, title string) *collect.Agent {
 		return &collect.Agent{Kind: collect.KindInteractive, Tool: tool, PaneTitle: title}
@@ -1675,7 +1676,11 @@ func TestNoteSuggestionByTool(t *testing.T) {
 		{"claude spinner glyph", interactive("claude", "⠐ build the API docs"), "build the API docs"},
 		{"claude bare title", interactive("claude", "plain title"), "plain title"},
 		{"claude glyph only", interactive("claude", "✳"), ""},
-		{"other tool", interactive("codex", "some task"), ""},
+		{"codex custom title", interactive("codex", "ACA2000 학부모 보조번호 반영"), "ACA2000 학부모 보조번호 반영"},
+		{"codex preserves punctuation", interactive("codex", "  [ACA2000] 학부모 보조번호 반영  "), "[ACA2000] 학부모 보조번호 반영"},
+		{"codex empty title", interactive("codex", "  "), ""},
+		{"background codex", &collect.Agent{Kind: collect.KindBackground, Tool: "codex", PaneTitle: "task"}, ""},
+		{"other tool", interactive("opencode", "some task"), ""},
 		{"empty title", interactive("claude", "  "), ""},
 		{"background claude", &collect.Agent{Kind: collect.KindBackground, Tool: "claude", PaneTitle: "✳ task"}, ""},
 		{"nil agent", nil, ""},
@@ -1718,6 +1723,41 @@ func TestFirstInteractiveClaudeNoteOffersStrippedTitleAsPrefill(t *testing.T) {
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if got, want := next.(Model).notesStore.Get("claude-pane"), "윈도우 타이틀에 메모 기능 추가"; got != want {
 		t.Errorf("saved suggested note = %q, want %q", got, want)
+	}
+}
+
+func TestFirstInteractiveCodexNoteOffersTitleAsPrefill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	const title = "ACA2000 학부모 보조번호 반영"
+	a := collect.Agent{
+		ID: "codex-pane", Kind: collect.KindInteractive, Tool: "codex",
+		Life: collect.LifeWorking, Project: "/p", Name: "codex-pane",
+		PaneTitle: title,
+	}
+	m := Model{snap: projSnap(a), notesStore: notes.Load(), width: 200}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if !m.suggestingNote || m.naming || m.suggestedNote != title {
+		t.Fatalf("first Codex note should suggest the pane title: suggesting=%v naming=%v title=%q", m.suggestingNote, m.naming, m.suggestedNote)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if m.suggestingNote || !m.naming || m.noteInput != title {
+		t.Fatalf("Enter should open the editor with the title: suggesting=%v naming=%v input=%q", m.suggestingNote, m.naming, m.noteInput)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if got := m.notesStore.Get(a.ID); got != title {
+		t.Fatalf("saved note = %q, want %q", got, title)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	if m.suggestingNote || !m.naming || m.noteInput != title {
+		t.Fatalf("existing Codex note should open directly for editing")
 	}
 }
 

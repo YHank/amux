@@ -69,7 +69,7 @@ The `View()` method assembles the dashboard from the model state; rendered age l
 
 **Kill** (x): Only for interactive panes (backgrounds are dismissed, not killed). Arms confirmation. y/Y kills; any other key cancels. Kills are irreversible; Model removes the pane from display immediately on success (doesn't wait for next refresh).
 
-**Note** (i): Opens input mode for editing or creating a note on the selected agent. On first note to an interactive pane, offers task-title prefill: strips the leading run of symbols and punctuation, covering omp's `π:` and `π >` prefixes and Claude Code's spinner or star glyph; other tools and backgrounds offer no suggestion.
+**Note** (i): Opens input mode for editing or creating a note on the selected agent. On first note to an interactive pane, offers task-title prefill: strips the leading run of symbols and punctuation, covering omp's `π:` and `π >` prefixes and Claude Code's spinner or star glyph; Codex uses the trimmed pane title as supplied. Other tools and backgrounds offer no suggestion.
 
 **Filter** (/): Substring search across agent name, project, tool name, and saved note. Matching is case-insensitive. Filtering never removes agents from the snapshot (only hides them from display rows). Empty filter shows all; selection is preserved when the selected agent remains visible.
 
