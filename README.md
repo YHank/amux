@@ -6,8 +6,8 @@
 together:
 
 1. **Interactive agents** — `claude`, `omp` ([Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)),
-   `opencode`, `codex`, `aider`, and `gemini` running in the foreground of any
-   tmux pane, across every session.
+   `omo` (OmO, also based on pi), `opencode`, `codex`, `aider`, and `gemini`
+   running in the foreground of any tmux pane, across every session.
 2. **Background agents** — live headless daemons that have **no tmux pane at
    all** and are otherwise invisible: Claude Code jobs started with the
    `agents` command, and Oh My Pi's own named background tasks. Persisted
@@ -60,7 +60,7 @@ working right now, what's waiting on you, and what's done — grouped by project
 - **Working vs. idle, read from the pane** — Claude Code 2.1.237 leaves its
   `✳ <task>` title in place long after a turn ends, so amux reads the live
   status row in the pane body (`Doodling… (3m 29s · ↓ 9.7k tokens)`) instead;
-  omp and OpenCode get the same content-based treatment. Older Claude Code
+  omp, omo, and OpenCode get the same content-based treatment. Older Claude Code
   builds that spin their title still work unchanged.
 - **Live preview, in color** — the detail panel shows the selected agent's
   real terminal output with its own colors intact, refreshed every cycle,
@@ -90,9 +90,9 @@ working right now, what's waiting on you, and what's done — grouped by project
 - **Your own notes, local to amux** — press `i` to jot a short note on any
   agent (why it's running, what you're waiting on), or `I` to delete its
   existing note; notes are saved to disk, shown in the list and detail panel,
-  and never written back to tmux/Claude/omp. For a first note on an interactive
-  OMP, Claude, or Codex pane, amux asks whether to prefill the note from that pane's
-  current tmux title (task name).
+  and never written back to tmux/Claude/omp/omo. For a first note on an interactive
+  OMP, OmO, Claude, or Codex pane, amux asks whether to prefill the note from
+  that pane's current tmux title (task name).
 - **Live detail** — model, tokens, CPU, age, and the original task for the
   selected agent.
 - **Attach or manage in a keystroke** — `Enter` switches to an interactive
@@ -105,7 +105,7 @@ working right now, what's waiting on you, and what's done — grouped by project
 ## Scope
 
 amux tracks **AI agents**: `claude` and `omp` (interactive and background),
-plus `opencode`/`codex`/`aider`/`gemini` when they run interactively in a pane.
+plus `omo`/`opencode`/`codex`/`aider`/`gemini` when they run interactively in a pane.
 Ordinary shells, editors, and prompt-theme sessions (e.g. an idle `oh-my-posh`
 shell with no agent running in it) are intentionally **not** listed — they're
 environment, not agents. Model/token detail on background agents is currently
@@ -124,7 +124,11 @@ Claude-specific; omp background tasks show name and state only.
 ```bash
 # From source
 git clone <your-repo> amux && cd amux
+make build              # builds ./amux and copies it to ~/.local/bin/amux
 make install            # builds and installs to /usr/local/bin
+
+# Override the automatic build-copy destination
+make build BUILD_INSTALL_PATH="$HOME/.bun/bin/amux"
 
 # Or directly
 go build -o amux ./cmd/amux
@@ -186,8 +190,10 @@ state:
 
 Notes you add with `i` live in their own file (`$XDG_CONFIG_HOME/amux/notes.json`,
 or the platform equivalent via `os.UserConfigDir()`), keyed by agent ID and
-pruned automatically once that agent's run ends — amux never touches any other
-tool's files.
+pruned when the tmux pane closes or the background run ends. An existing pane
+keeps its note even if a refresh misses its agent process or a dashboard does
+not recognize its tool; a failed pane scan never clears notes. amux never
+touches any other tool's files.
 
 ## Requirements
 

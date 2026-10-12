@@ -1,7 +1,7 @@
 // Package collect gathers the live state of AI coding agents from two disjoint
 // sources and correlates them into a single project-grouped snapshot:
 //
-//  1. Interactive agents  — a supported AI CLI process (`claude`, `omp`,
+//  1. Interactive agents  — a supported AI CLI process (`claude`, `omp`, `omo`,
 //     `opencode`, `codex`, `aider`, or `gemini`) running in the foreground of
 //     a tmux pane. These are visible via `tmux list-panes`
 //     plus a process-tree walk.
@@ -52,7 +52,7 @@ func (l Lifecycle) Terminal() bool {
 type Agent struct {
 	ID   string // stable id: sessionId (background) or tmux pane id (interactive)
 	Kind Kind
-	Tool string // claude | omp | opencode | codex | aider | gemini
+	Tool string // claude | omp | omo | opencode | codex | aider | gemini
 
 	Name  string    // job name, or "session:win.pane" for interactive
 	Model string    // e.g. sonnet, opus[1m] (background only)
@@ -148,6 +148,9 @@ type Snapshot struct {
 	Projects []Project
 	Agents   []Agent // flat list, all agents
 	Taken    time.Time
+	// LivePaneIDs includes every tmux pane, even when its agent is not
+	// recognized. Nil means the pane inventory could not be read safely.
+	LivePaneIDs map[string]bool
 }
 
 // Counts summarizes agents by lifecycle for the statusbar widget.

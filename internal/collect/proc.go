@@ -33,6 +33,7 @@ var aiTools = map[string]string{
 	"aider":        "aider",
 	"gemini":       "gemini",
 	"omp":          "omp", // Oh My Pi (@oh-my-pi/pi-coding-agent) — a bun-run CLI, unrelated to oh-my-posh
+	"omo":          "omo", // OmO — a pi-based coding-agent CLI
 	"opencode":     "opencode",
 	"opencode.exe": "opencode",
 }

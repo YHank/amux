@@ -320,8 +320,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // noteSuggestion returns a prefill for a first note on an interactive pane
-// for omp, Claude Code, or Codex. Tool-specific status prefixes are removed
-// for omp and Claude Code; Codex titles are used as supplied.
+// for omp, omo, Claude Code, or Codex. Tool-specific prefixes are removed;
+// Codex titles are used as supplied.
 func noteSuggestion(a *collect.Agent) string {
 	if a == nil || a.Kind != collect.KindInteractive {
 		return ""
@@ -333,6 +333,9 @@ func noteSuggestion(a *collect.Agent) string {
 	switch a.Tool {
 	case "codex":
 		return title
+	case "omo":
+		// OmO's native binary uses "OmO - <task> - <project>" titles.
+		return activityText(strings.TrimPrefix(title, "OmO -"))
 	case "omp", "claude":
 		// Both leading markers vary by version and state — omp has shipped
 		// both "π: <task>" and "π > <task>", and Claude Code's glyph is a
@@ -375,7 +378,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// A first note on an omp, Claude, or Codex pane can be prefilled from its tmux
+	// A first note on an omp, omo, Claude, or Codex pane can be prefilled from its tmux
 	// title (for example, "π: fix student-search dropdown"). y or enter
 	// accepts the suggestion, n opens a blank editor, and esc cancels the
 	// note request.
@@ -704,11 +707,17 @@ func interactiveActivityChanged(prior, current collect.Agent) bool {
 		activityText(prior.Detail) != activityText(current.Detail)
 }
 
-// pruneNotes drops any stored note whose agent isn't in the current snapshot
-// (unfiltered — filtering never removes an agent from m.snap, only from the
-// displayed rows), so notes.json doesn't accumulate labels for finished runs.
+// pruneNotes drops notes only after their pane or background run disappears.
+// Tool recognition can differ across dashboards or miss a process during a
+// refresh, so existing panes retain their notes even without a detected agent.
 func (m *Model) pruneNotes() {
-	live := make(map[string]bool, len(m.snap.Agents))
+	if m.snap.LivePaneIDs == nil {
+		return // A failed pane inventory must not erase shared notes.
+	}
+	live := make(map[string]bool, len(m.snap.Agents)+len(m.snap.LivePaneIDs))
+	for id := range m.snap.LivePaneIDs {
+		live[id] = true
+	}
 	for _, a := range m.snap.Agents {
 		live[a.ID] = true
 	}

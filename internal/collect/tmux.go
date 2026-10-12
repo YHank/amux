@@ -29,13 +29,13 @@ func TmuxRunning() bool {
 	return exec.Command("tmux", "has-session").Run() == nil
 }
 
-// listPanes returns every pane across every session. An absent server is not an
-// error — it just means there are no interactive panes to show.
+// listPanes returns every pane across every session. A failed query is not
+// proof that panes disappeared; callers can still show background agents,
+// but must preserve notes until a complete pane inventory is available.
 func listPanes() ([]pane, error) {
 	out, err := exec.Command("tmux", "list-panes", "-a", "-F", paneFormat).Output()
 	if err != nil {
-		// No server / no sessions: report zero panes, not a hard failure.
-		return nil, nil
+		return nil, err
 	}
 	var panes []pane
 	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
@@ -76,11 +76,7 @@ const previewLines = 40
 
 // interactiveAgents scans every pane for a foreground AI process and builds an
 // Agent for each match.
-func interactiveAgents(procs *procTable) ([]Agent, error) {
-	panes, err := listPanes()
-	if err != nil {
-		return nil, err
-	}
+func interactiveAgents(procs *procTable, panes []pane) []Agent {
 	var agents []Agent
 	for _, pn := range panes {
 		ap, ok := procs.findAgentProc(pn.pid)
@@ -119,7 +115,16 @@ func interactiveAgents(procs *procTable) ([]Agent, error) {
 			NeedsInput:         needsInput,
 		})
 	}
-	return agents, nil
+	return agents
+}
+
+// paneIDs preserves notes for existing panes independently of tool detection.
+func paneIDs(panes []pane) map[string]bool {
+	ids := make(map[string]bool, len(panes))
+	for _, pn := range panes {
+		ids[pn.paneID] = true
+	}
+	return ids
 }
 
 // capturePane returns a pane's actual terminal content ending at the bottom of

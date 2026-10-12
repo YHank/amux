@@ -17,6 +17,13 @@ func TestDetectTool(t *testing.T) {
 		{"codex via argv0 basename", proc{comm: "node", args: "node /usr/local/bin/codex --foo"}, "codex"},
 		{"absolute claude path", proc{comm: "claude", args: "/Users/x/.local/bin/claude"}, "claude"},
 		{"omp via bun wrapper", proc{comm: "bun", args: "bun /Users/x/.bun/bin/omp"}, "omp"},
+		{"omo foreground", proc{comm: "omo", args: "omo"}, "omo"},
+		{"omo absolute executable", proc{comm: "/Users/x/.local/bin/omo", args: "/Users/x/.local/bin/omo"}, "omo"},
+		{"omo versioned runtime with truncated comm", proc{comm: "/Users/x/.o", args: "/Users/x/.omo/binary-runtime/5.1.30/omo"}, "omo"},
+		{"omo via bun wrapper", proc{comm: "bun", args: "bun /Users/x/.local/bin/omo"}, "omo"},
+		{"omo via node wrapper", proc{comm: "node", args: "node --no-warnings /usr/local/bin/omo"}, "omo"},
+		{"ordinary filename named omo", proc{comm: "cat", args: "cat /tmp/omo"}, ""},
+		{"later bun argument named omo", proc{comm: "bun", args: "bun server.js omo"}, ""},
 		{"opencode foreground", proc{comm: "opencode", args: "opencode"}, "opencode"},
 		{"opencode executable suffix", proc{comm: "opencode.exe", args: "opencode.exe"}, "opencode"},
 		{"opencode absolute argv", proc{comm: "bun", args: "/opt/homebrew/bin/opencode"}, "opencode"},
@@ -28,6 +35,44 @@ func TestDetectTool(t *testing.T) {
 		if got := detectTool(c.p); got != c.want {
 			t.Errorf("%s: detectTool = %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+func TestFindOMOAgentProc(t *testing.T) {
+	procs := procTable{
+		byPID: map[int]proc{
+			100: {pid: 100, comm: "-zsh", args: "-zsh"},
+			101: {pid: 101, ppid: 100, comm: "/Users/x/.o", args: "/Users/x/.omo/binary-runtime/5.1.30/omo"},
+			102: {pid: 102, ppid: 101, comm: "/Users/x/.o", args: "/Users/x/.omo/binary-runtime/5.1.30/omo --internal-rpc-host-supervisor"},
+		},
+		children: map[int][]int{100: {101}, 101: {102}},
+	}
+	got, ok := procs.findAgentProc(100)
+	if !ok || got.pid != 101 || detectTool(got) != "omo" {
+		t.Fatalf("findAgentProc = %#v, %v; want the foreground omo process", got, ok)
+	}
+}
+
+func TestPaneIDsIncludeUnrecognizedAgents(t *testing.T) {
+	panes := []pane{
+		{paneID: "%320", pid: 100},
+		{paneID: "%321", pid: 200},
+	}
+	procs := &procTable{
+		byPID: map[int]proc{
+			100: {pid: 100, comm: "future-agent", args: "future-agent"},
+		},
+		children: map[int][]int{},
+	}
+	if agents := interactiveAgents(procs, panes); len(agents) != 0 {
+		t.Fatalf("unrecognized or missing processes should not produce agents: %#v", agents)
+	}
+	ids := paneIDs(panes)
+	if !ids["%320"] || !ids["%321"] || len(ids) != 2 {
+		t.Fatalf("note retention must include both existing panes: %#v", ids)
+	}
+	if ids := paneIDs(nil); ids == nil || len(ids) != 0 {
+		t.Fatalf("a successful empty inventory must differ from a failed scan: %#v", ids)
 	}
 }
 
@@ -216,9 +261,10 @@ func TestInteractiveLife(t *testing.T) {
 		// were all verified idle from their bodies.
 		{"✳ 학생 상담 및 분석용 API 8개 제작", LifeIdle},
 		{"✳ Claude Code", LifeIdle},
-		{"claude agents", LifeIdle},       // no spinner — at a menu/idle
-		{"π: tmux_agent_check", LifeIdle}, // omp idle title, no spinner
-		{"", LifeIdle},                    // no title at all
+		{"claude agents", LifeIdle},                  // no spinner — at a menu/idle
+		{"π: tmux_agent_check", LifeIdle},            // omp idle title, no spinner
+		{"OmO - translate text - project", LifeIdle}, // omo title stays static at rest
+		{"", LifeIdle}, // no title at all
 		{"   ", LifeIdle},
 	}
 	for _, c := range cases {
@@ -356,6 +402,24 @@ func TestStripANSI(t *testing.T) {
 	}
 	if got := stripANSI("plain text"); got != "plain text" {
 		t.Errorf("stripANSI on plain text should be a no-op, got %q", got)
+	}
+}
+
+func TestOMOContentShowsSpinner(t *testing.T) {
+	// Reuse pi's supported spinner format; the idle layout was observed in
+	// a live OmO pane. No title or footer branding indicates active work.
+	working := []string{"\x1b[36m ⠸ Running Go test suite ⟨esc⟩\x1b[0m", "", "❯", "project • main", "(😺 OmO Native by Q Kim)"}
+	if !contentShowsSpinner("omo", working) {
+		t.Error("expected omo's ANSI-wrapped pi spinner to indicate work")
+	}
+	idle := []string{"Finished the task.", "────────────────", "❯", "────────────────", "project • main", "(😺 OmO Native by Q Kim)"}
+	if contentShowsSpinner("omo", idle) {
+		t.Error("omo's idle prompt and branding must not indicate work")
+	}
+	oldSpinner := append([]string{"⠸ Previous task"}, make([]string, contentSpinnerScanLines)...)
+	oldSpinner[len(oldSpinner)-1] = "❯"
+	if contentShowsSpinner("omo", oldSpinner) {
+		t.Error("omo spinner outside the trailing scan window must be ignored")
 	}
 }
 

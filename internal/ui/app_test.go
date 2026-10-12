@@ -1655,8 +1655,8 @@ func TestComposeEnterWithEmptyTextDoesNotSend(t *testing.T) {
 }
 
 // TestNoteSuggestionByTool verifies which pane titles become note prefills:
-// omp drops its "π:" prefix, Claude Code drops its leading spinner glyph, and
-// Codex keeps its title, and other tools, empty titles, and non-interactive
+// omp drops its "π:" prefix, omo drops "OmO -", and Claude Code drops its
+// leading spinner glyph. Codex keeps its title; other tools, empty titles, and non-interactive
 // agents offer nothing.
 func TestNoteSuggestionByTool(t *testing.T) {
 	interactive := func(tool, title string) *collect.Agent {
@@ -1672,6 +1672,12 @@ func TestNoteSuggestionByTool(t *testing.T) {
 		// still ships, so both have to survive the same strip.
 		{"omp strips arrow prefix", interactive("omp", "π > Improve activity sorting"), "Improve activity sorting"},
 		{"omp glyph only", interactive("omp", "π >"), ""},
+		{"omo native title", interactive("omo", "OmO - 텍스트 한글 번역 - project"), "텍스트 한글 번역 - project"},
+		{"omo pi title", interactive("omo", "π > fix dropdown"), "fix dropdown"},
+		{"omo bare title", interactive("omo", "plain task"), "plain task"},
+		{"omo prefix only", interactive("omo", "OmO -"), ""},
+		{"omo empty title", interactive("omo", "  "), ""},
+		{"background omo", &collect.Agent{Kind: collect.KindBackground, Tool: "omo", PaneTitle: "OmO - task"}, ""},
 		{"claude idle glyph", interactive("claude", "✳ 학생 개별 수강료 팝업창 개선"), "학생 개별 수강료 팝업창 개선"},
 		{"claude spinner glyph", interactive("claude", "⠐ build the API docs"), "build the API docs"},
 		{"claude bare title", interactive("claude", "plain title"), "plain title"},
@@ -1758,6 +1764,35 @@ func TestFirstInteractiveCodexNoteOffersTitleAsPrefill(t *testing.T) {
 	m = next.(Model)
 	if m.suggestingNote || !m.naming || m.noteInput != title {
 		t.Fatalf("existing Codex note should open directly for editing")
+	}
+}
+
+func TestFirstInteractiveOMONoteOffersTitleAsPrefill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	a := collect.Agent{
+		ID: "omo-pane", Kind: collect.KindInteractive, Tool: "omo",
+		Life: collect.LifeIdle, Project: "/p", Name: "omo-pane",
+		PaneTitle: "OmO - 텍스트 한글 번역 - project",
+	}
+	m := Model{snap: projSnap(a), notesStore: notes.Load(), width: 200}
+	m.rebuildRows()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(Model)
+	const want = "텍스트 한글 번역 - project"
+	if !m.suggestingNote || m.naming || m.suggestedNote != want {
+		t.Fatalf("first omo note should suggest the task: suggesting=%v naming=%v title=%q", m.suggestingNote, m.naming, m.suggestedNote)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if m.suggestingNote || !m.naming || m.noteInput != want {
+		t.Fatalf("Enter should open the editor with the task: suggesting=%v naming=%v input=%q", m.suggestingNote, m.naming, m.noteInput)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := next.(Model).notesStore.Get(a.ID); got != want {
+		t.Fatalf("saved omo note = %q, want %q", got, want)
 	}
 }
 
@@ -2206,6 +2241,55 @@ func TestSideBySideViewFitsTerminalWidth(t *testing.T) {
 		if got := lipgloss.Width(line); got > m.width {
 			t.Fatalf("side-by-side line width = %d, want at most %d: %q", got, m.width, line)
 		}
+	}
+}
+
+func TestOMONoteSurvivesRefreshFromDashboardWithoutToolRecognition(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	agent := collect.Agent{ID: "%320", Kind: collect.KindInteractive, Tool: "omo", Life: collect.LifeIdle, Project: "/p", Name: "omo"}
+	m := Model{snap: projSnap(agent), notesStore: notes.Load()}
+	m.rebuildRows()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("번역 작업 확인")})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if got := m.notesStore.Get(agent.ID); got != "번역 작업 확인" {
+		t.Fatalf("i should save the omo note: %q", got)
+	}
+
+	// Another dashboard sees the pane but cannot recognize its agent. Its
+	// refresh must not delete the shared note written by the first dashboard.
+	other := Model{notesStore: notes.Load()}
+	missingAgent := collect.Snapshot{LivePaneIDs: map[string]bool{agent.ID: true}}
+	for i := 0; i < 3; i++ {
+		next, _ = other.Update(snapshotMsg{snap: missingAgent})
+		other = next.(Model)
+	}
+	m.notesStore.Reload()
+	if got := m.notesStore.Get(agent.ID); got != "번역 작업 확인" {
+		t.Fatalf("existing pane's note disappeared after refresh: %q", got)
+	}
+
+	next, _ = other.Update(snapshotMsg{snap: collect.Snapshot{LivePaneIDs: map[string]bool{}}})
+	if got := next.(Model).notesStore.Get(agent.ID); got != "" {
+		t.Fatalf("closed pane's note should be pruned: %q", got)
+	}
+}
+
+func TestFailedPaneInventoryPreservesSharedNotes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	m := Model{notesStore: notes.Load()}
+	m.notesStore.Set("%320", "keep the omo note")
+	for i := 0; i < 3; i++ {
+		next, _ := m.Update(snapshotMsg{snap: collect.Snapshot{}})
+		m = next.(Model)
+	}
+	if got := notes.Load().Get("%320"); got != "keep the omo note" {
+		t.Fatalf("failed inventory erased the persisted note: %q", got)
 	}
 }
 

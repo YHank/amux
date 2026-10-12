@@ -20,10 +20,12 @@ func Collect(now time.Time) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	inter, err := interactiveAgents(procs)
-	if err != nil {
-		return Snapshot{}, err
+	panes, paneErr := listPanes()
+	var livePaneIDs map[string]bool
+	if paneErr == nil {
+		livePaneIDs = paneIDs(panes)
 	}
+	inter := interactiveAgents(procs, panes)
 	bg, err := backgroundAgents(liveShorts())
 	if err != nil {
 		return Snapshot{}, err
@@ -37,9 +39,10 @@ func Collect(now time.Time) (Snapshot, error) {
 	all = appendLiveBackgrounds(all, bg)
 	all = appendLiveBackgrounds(all, ompBg)
 	snap := Snapshot{
-		Agents:   all,
-		Projects: group(all),
-		Taken:    now,
+		Agents:      all,
+		Projects:    group(all),
+		Taken:       now,
+		LivePaneIDs: livePaneIDs,
 	}
 	return snap, nil
 }
