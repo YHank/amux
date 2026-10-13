@@ -617,7 +617,7 @@ func TestKeyboardHelpScrollsWithinSmallTerminal(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	m = next.(Model)
 	help := m.View()
-	if !strings.Contains(help, "Keyboard shortcuts") || !strings.Contains(help, "1-7 / 16") {
+	if !strings.Contains(help, "Keyboard shortcuts") || !strings.Contains(help, "1-7 / 17") {
 		t.Fatalf("first help page = %q", help)
 	}
 	lines := strings.Split(help, "\n")
@@ -635,7 +635,7 @@ func TestKeyboardHelpScrollsWithinSmallTerminal(t *testing.T) {
 	if m.helpOffset != 1 {
 		t.Fatalf("help offset = %d, want 1 after j", m.helpOffset)
 	}
-	if help = m.View(); !strings.Contains(help, "2-8 / 16") {
+	if help = m.View(); !strings.Contains(help, "2-8 / 17") {
 		t.Errorf("scrolled help page = %q", help)
 	}
 }

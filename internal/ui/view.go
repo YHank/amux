@@ -25,6 +25,7 @@ var keyboardHelpEntries = []helpEntry{
 	{"y", "confirm a pending pane kill"},
 	{"/", "filter agents"},
 	{"i / I", "add or edit / delete a note"},
+	{"o", "generate and apply a note asynchronously (repeatable)"},
 	{"a", "acknowledge the selected error"},
 	{"d", "show or hide history"},
 	{"p", "toggle project-grouped and flat views"},
@@ -269,16 +270,18 @@ func (m Model) renderFooter() string {
 	if m.filtering {
 		return truncateWidth(styleTitle.Render("/")+m.filter+styleFaint.Render("▏  (enter to apply · esc to clear)"), m.width)
 	}
-	keys := []string{"j/k move", "? help", "q quit"}
+	keys := []string{"j/k move", "o title", "? help", "q quit"}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
 	switch {
 	case m.notice != "":
 		c := cGreen
-		if strings.HasPrefix(m.notice, "send failed") || strings.HasPrefix(m.notice, "kill failed") {
+		if strings.HasPrefix(m.notice, "send failed") || strings.HasPrefix(m.notice, "kill failed") || strings.HasPrefix(m.notice, "omp failed") {
 			c = cRed
 		}
 		stamp = lipgloss.NewStyle().Foreground(c).Render(m.notice)
+	case len(m.autoTitleRequests) > 0:
+		stamp = styleTitle.Render(fmt.Sprintf("omp: %d pending", len(m.autoTitleRequests)))
 	case !m.lastRefresh.IsZero():
 		stamp = styleFaint.Render("updated " + m.lastRefresh.Format("15:04:05"))
 	}

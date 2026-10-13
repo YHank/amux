@@ -81,6 +81,8 @@ type Model struct {
 	noteRequest            uint64
 	noteCancel             context.CancelFunc
 	noteError              string
+	autoTitleRequests      map[uint64]autoTitleRequest
+	autoTitleLatest        map[string]uint64
 	naming                 bool   // capturing a note for the selected agent
 	namingAgentID          string // agent that owns the in-progress note
 	noteInput              string
@@ -274,6 +276,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.recordStatusChangeTimes(&msg.snap)
 		m.snap = msg.snap
+		m.pruneAutoTitles()
 		m.pruneNotes()
 		m.pruneAcknowledged()
 		m.pruneDismissed()
@@ -305,6 +308,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case purposeTitleMsg:
 		return m.applyPurposeTitle(msg), nil
 
+	case autoTitleMsg:
+		return m.applyAutoTitle(msg), nil
+
 	case sentMsg:
 		if msg.err != nil {
 			m.notice = "send failed: " + msg.err.Error()
@@ -319,6 +325,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.removePane(msg.target)
+		m.pruneAutoTitles()
 		m.notice = "killed " + msg.name
 		return m, nil
 
@@ -372,6 +379,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearNoteSuggestion()
 		case "q", "ctrl+c":
 			m.clearNoteSuggestion()
+			m.cancelAutoTitles("")
 			m.persistViewPreferences()
 			m.quit = true
 			return m, tea.Quit
@@ -502,6 +510,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q", "ctrl+c":
+		m.cancelAutoTitles("")
 		m.persistViewPreferences()
 		m.quit = true
 		return m, tea.Quit
@@ -525,8 +534,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		m.filtering = true
+	case "o":
+		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive {
+			return m.fetchAutoTitle(*a)
+		}
+	case "esc":
+		if a := m.selectedAgent(); a != nil {
+			m.cancelAutoTitles(a.ID)
+		}
 	case "i":
 		if a := m.selectedAgent(); a != nil {
+			m.cancelAutoTitles(a.ID)
 			m.noteError = ""
 			m.noteInput = m.notesStore.Get(a.ID)
 			if m.noteInput == "" {
@@ -545,6 +563,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "I":
 		if a := m.selectedAgent(); a != nil {
+			m.cancelAutoTitles(a.ID)
 			m.notesStore.Set(a.ID, "")
 			m.rebuildRows()
 		}
@@ -599,6 +618,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if a := m.selectedAgent(); a != nil {
 			if action := actionFor(a); action != nil {
+				m.cancelAutoTitles("")
 				m.persistViewPreferences()
 				m.action = action
 				m.quit = true
