@@ -248,13 +248,22 @@ func (m Model) renderFooter() string {
 			styleFaint.Render("  y to confirm · any other key cancels"), m.width)
 	}
 	if m.suggestingNote {
-		return truncateWidth(styleTitle.Render("use task title as note: "+m.suggestedNote+"?")+
-			styleFaint.Render("  y/enter to prefill · n for blank · esc to cancel"), m.width)
+		hint := styleFaint.Render("  y/enter prefill · n blank · o omp · esc cancel")
+		title := truncateWidth("use task title as note: "+m.suggestedNote+"?", max(0, m.width-lipgloss.Width(hint)))
+		return truncateWidth(styleTitle.Render(title)+hint, m.width)
+	}
+	if m.fetchingNote {
+		return truncateWidth(styleTitle.Render("omp: fetching purpose title...")+
+			styleFaint.Render("  esc to cancel"), m.width)
 	}
 	if m.composing {
 		return truncateWidth(styleTitle.Render("send: ")+m.composeInput+styleFaint.Render("▏  (enter to send · esc to cancel)"), m.width)
 	}
 	if m.naming {
+		if m.noteError != "" {
+			return truncateWidth(lipgloss.NewStyle().Foreground(cRed).Render(m.noteError)+"  note: "+m.noteInput+
+				styleFaint.Render(" (enter save · esc cancel)"), m.width)
+		}
 		return truncateWidth(styleTitle.Render("note: ")+m.noteInput+styleFaint.Render("▏  (enter to save · esc to cancel)"), m.width)
 	}
 	if m.filtering {

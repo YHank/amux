@@ -1708,7 +1708,7 @@ func TestFirstInteractiveClaudeNoteOffersStrippedTitleAsPrefill(t *testing.T) {
 	cl := collect.Agent{
 		ID: "claude-pane", Kind: collect.KindInteractive, Tool: "claude",
 		Life: collect.LifeWorking, Project: "/p", Name: "claude-pane",
-		PaneTitle: "✳ 윈도우 타이틀에 메모 기능 추가",
+		PaneTitle: "✳ 윈도우 타이틀에 작업 목적 메모 기능 추가하기",
 	}
 	m := Model{snap: projSnap(cl), notesStore: notes.Load(), width: 200}
 	m.rebuildRows()
@@ -1723,11 +1723,11 @@ func TestFirstInteractiveClaudeNoteOffersStrippedTitleAsPrefill(t *testing.T) {
 	if m.suggestingNote || !m.naming {
 		t.Fatalf("y should open the note editor: suggesting=%v naming=%v", m.suggestingNote, m.naming)
 	}
-	if got, want := m.noteInput, "윈도우 타이틀에 메모 기능 추가"; got != want {
+	if got, want := m.noteInput, "윈도우 타이틀에 작업 목적 메모 기능 추가하기"; got != want {
 		t.Errorf("suggested note = %q, want %q", got, want)
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if got, want := next.(Model).notesStore.Get("claude-pane"), "윈도우 타이틀에 메모 기능 추가"; got != want {
+	if got, want := next.(Model).notesStore.Get("claude-pane"), "윈도우 타이틀에 작업 목적 메모 기능 추가하기"; got != want {
 		t.Errorf("saved suggested note = %q, want %q", got, want)
 	}
 }
@@ -1736,7 +1736,7 @@ func TestFirstInteractiveCodexNoteOffersTitleAsPrefill(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	const title = "ACA2000 학부모 보조번호 반영"
+	const title = "ACA2000 학부모 보조번호를 연락처 목록에 반영"
 	a := collect.Agent{
 		ID: "codex-pane", Kind: collect.KindInteractive, Tool: "codex",
 		Life: collect.LifeWorking, Project: "/p", Name: "codex-pane",
@@ -1774,14 +1774,14 @@ func TestFirstInteractiveOMONoteOffersTitleAsPrefill(t *testing.T) {
 	a := collect.Agent{
 		ID: "omo-pane", Kind: collect.KindInteractive, Tool: "omo",
 		Life: collect.LifeIdle, Project: "/p", Name: "omo-pane",
-		PaneTitle: "OmO - 텍스트 한글 번역 - project",
+		PaneTitle: "OmO - 텍스트를 한글로 번역하는 기능 구현 - project",
 	}
 	m := Model{snap: projSnap(a), notesStore: notes.Load(), width: 200}
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
-	const want = "텍스트 한글 번역 - project"
+	const want = "텍스트를 한글로 번역하는 기능 구현 - project"
 	if !m.suggestingNote || m.naming || m.suggestedNote != want {
 		t.Fatalf("first omo note should suggest the task: suggesting=%v naming=%v title=%q", m.suggestingNote, m.naming, m.suggestedNote)
 	}
@@ -1837,7 +1837,7 @@ func TestEnterAcceptsOMPTitleSuggestion(t *testing.T) {
 
 	omp := collect.Agent{
 		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
-		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "dynamic title",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "dynamic purpose title longer than twenty",
 	}
 	m := Model{snap: projSnap(omp), notesStore: notes.Load()}
 	m.rebuildRows()
@@ -1848,7 +1848,7 @@ func TestEnterAcceptsOMPTitleSuggestion(t *testing.T) {
 	if m.suggestingNote || !m.naming {
 		t.Fatalf("enter should accept the suggestion: suggesting=%v naming=%v", m.suggestingNote, m.naming)
 	}
-	if got, want := m.noteInput, "dynamic title"; got != want {
+	if got, want := m.noteInput, "dynamic purpose title longer than twenty"; got != want {
 		t.Errorf("enter-prefilled note = %q, want %q", got, want)
 	}
 }
@@ -1859,7 +1859,7 @@ func TestOMPSuggestedNoteEscCancels(t *testing.T) {
 
 	omp := collect.Agent{
 		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
-		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "task",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "purpose title longer than twenty",
 	}
 	m := Model{snap: projSnap(omp), notesStore: notes.Load()}
 	m.rebuildRows()
@@ -1881,7 +1881,7 @@ func TestOMPSuggestedNoteIgnoresOtherKeysAndCancelsAfterPaneRefresh(t *testing.T
 
 	omp := collect.Agent{
 		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
-		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "task",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "purpose title longer than twenty",
 	}
 	other := collect.Agent{
 		ID: "other-pane", Kind: collect.KindInteractive, Tool: "claude",
@@ -1914,7 +1914,7 @@ func TestAcceptedOMPSuggestedNoteCancelsIfSourcePaneDisappears(t *testing.T) {
 
 	omp := collect.Agent{
 		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
-		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "task",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "purpose title longer than twenty",
 	}
 	other := collect.Agent{
 		ID: "other-pane", Kind: collect.KindInteractive, Tool: "claude",
@@ -1947,7 +1947,7 @@ func TestOMPSuggestedNoteCanBeDeclinedAndDoesNotRepeatForExistingNote(t *testing
 
 	omp := collect.Agent{
 		ID: "omp-pane", Kind: collect.KindInteractive, Tool: "omp",
-		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "task",
+		Life: collect.LifeWorking, Project: "/p", Name: "omp-pane", PaneTitle: "purpose title longer than twenty",
 	}
 	m := Model{snap: projSnap(omp), notesStore: notes.Load()}
 	m.rebuildRows()
@@ -2248,10 +2248,12 @@ func TestOMONoteSurvivesRefreshFromDashboardWithoutToolRecognition(t *testing.T)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	agent := collect.Agent{ID: "%320", Kind: collect.KindInteractive, Tool: "omo", Life: collect.LifeIdle, Project: "/p", Name: "omo"}
+	agent := collect.Agent{ID: "%320", Kind: collect.KindInteractive, Tool: "omo", Life: collect.LifeIdle, Project: "/p", Name: "omo",
+		PaneTitle: "OmO - 메모를 다른 대시보드 새로고침에서도 보존하기"}
 	m := Model{snap: projSnap(agent), notesStore: notes.Load()}
 	m.rebuildRows()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("번역 작업 확인")})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(Model)

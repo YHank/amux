@@ -2,12 +2,14 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -75,6 +77,10 @@ type Model struct {
 	suggestingNote         bool   // asking whether to prefill a first note from the pane's tmux title
 	suggestedNote          string // pane-title task offered as the note prefill
 	suggestedNoteID        string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
+	fetchingNote           bool
+	noteRequest            uint64
+	noteCancel             context.CancelFunc
+	noteError              string
 	naming                 bool   // capturing a note for the selected agent
 	namingAgentID          string // agent that owns the in-progress note
 	noteInput              string
@@ -282,7 +288,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startupPaneID = ""
 		}
 		m.persistViewPreferences()
-		if m.suggestingNote {
+		if m.suggestingNote || m.fetchingNote {
 			if a := m.selectedAgent(); a == nil || a.ID != m.suggestedNoteID {
 				m.clearNoteSuggestion()
 			}
@@ -295,6 +301,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case purposeTitleMsg:
+		return m.applyPurposeTitle(msg), nil
 
 	case sentMsg:
 		if msg.err != nil {
@@ -347,11 +356,28 @@ func noteSuggestion(a *collect.Agent) string {
 }
 
 func (m *Model) clearNoteSuggestion() {
+	if m.noteCancel != nil {
+		m.noteCancel()
+		m.noteCancel = nil
+	}
+	m.fetchingNote = false
 	m.suggestingNote = false
 	m.suggestedNote = ""
 	m.suggestedNoteID = ""
 }
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.fetchingNote {
+		switch msg.String() {
+		case "esc":
+			m.clearNoteSuggestion()
+		case "q", "ctrl+c":
+			m.clearNoteSuggestion()
+			m.persistViewPreferences()
+			m.quit = true
+			return m, tea.Quit
+		}
+		return m, nil
+	}
 	// Kill confirmation: only y/Y confirms; every other key cancels, no
 	// exceptions — a destructive action should never fire on a stray keypress.
 	if m.confirmingKill {
@@ -389,6 +415,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
+		case "o", "O":
+			return m.fetchPurposeTitle(*a)
 		case "y", "Y", "enter":
 			m.noteInput = m.suggestedNote
 		case "n", "N":
@@ -433,6 +461,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.naming {
 		switch msg.Type {
 		case tea.KeyEnter:
+			m.noteError = ""
 			if m.namingAgentID != "" {
 				m.notesStore.Set(m.namingAgentID, strings.TrimSpace(m.noteInput))
 			}
@@ -440,6 +469,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.namingAgentID = ""
 			m.rebuildRows()
 		case tea.KeyEsc:
+			m.noteError = ""
 			m.naming = false
 			m.namingAgentID = ""
 			m.noteInput = ""
@@ -497,8 +527,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 	case "i":
 		if a := m.selectedAgent(); a != nil {
+			m.noteError = ""
 			m.noteInput = m.notesStore.Get(a.ID)
 			if m.noteInput == "" {
+				if a.Kind == collect.KindInteractive && utf8.RuneCountInString(noteSuggestion(a)) <= 20 {
+					return m.fetchPurposeTitle(*a)
+				}
 				if suggestion := noteSuggestion(a); suggestion != "" {
 					m.suggestingNote = true
 					m.suggestedNote = suggestion
