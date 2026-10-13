@@ -1,7 +1,7 @@
-<!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-08-20 -->
-
 # collect
+
+**Parent context:** `../AGENTS.md`
+**Generated:** 2026-07-23 · **Updated:** 2026-10-12
 
 ## Purpose
 
@@ -20,6 +20,7 @@ Collects a normalized snapshot of AI coding agents from two disjoint discovery s
 | `liveness.go` | Verifies daemon liveness: `liveShorts()` globs Claude Code rendezvous sockets (`/tmp/cc-daemon-*/*/rv/*.sock`), `processAlive()` probes PID with signal 0 for process existence. Both are authoritative runtime signals, not file timestamps. |
 | `collect_test.go` | 20+ deterministic unit tests: parser/liveness via fixture data (no live tmux dependency). Covers `detectTool()`, `parsePaneLine()`, `parseProcLine()`, `parseElapsed()`, `interactiveLife()` (spinner glyphs), `looksLikeChoicePrompt()` (with ANSI stripping), `contentShowsSpinner()`, `normalizeLife()`, `jobToAgent()`, and grouping/attention-ranking functions. |
 | `omp_test.go` | 5 omp-specific tests: `ompNormalizeLife()` (state→lifecycle with daemon liveness), `ompTaskLive()` (task state vs. owner daemon liveness), `msToTime()` (epoch-ms parsing), `ompTaskToAgent()` (daemon task→Agent), liveness propagation. |
+| `live_probe_test.go` | Opt-in live probe (`AMUX_LIVE_PROBE=1`) that runs `Collect` against the real tmux server and logs interactive agents; skipped by default. |
 ## Subdirectories
 
 | Directory | Purpose |
@@ -60,3 +61,7 @@ Collects a normalized snapshot of AI coding agents from two disjoint discovery s
 - **Oh My Pi**: `~/.omp/run/daemons/<hash>/daemons/<name>/meta.json` (JSON-decoded), PID lookups via signal 0 probe.
 - **Data Formats**: Go `encoding/json` (Claude and OMP state files), `time` (start time approximation via ps etime parsing).
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Manual Notes
+
+Notes under this heading are written by humans and preserved on regeneration.

@@ -1,7 +1,7 @@
-<!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-08-20 -->
-
 # cmd
+
+**Parent context:** `../AGENTS.md`
+**Generated:** 2026-07-23 · **Updated:** 2026-10-12
 
 ## Purpose
 Contains executable entrypoints for the `amux` project. Implements the CLI command structure using Cobra, command wiring to internal services, and user-facing actions that interact with tmux and Claude agents.
@@ -51,3 +51,7 @@ Contains executable entrypoints for the `amux` project. Implements the CLI comma
 - `github.com/charmbracelet/bubbletea` for TUI program initialization (imported via `internal/ui`).
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Manual Notes
+
+Notes under this heading are written by humans and preserved on regeneration.

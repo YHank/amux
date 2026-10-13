@@ -1,6 +1,6 @@
-<!-- Generated: 2026-07-23 | Updated: 2026-08-20 -->
-
 # amux
+
+**Generated:** 2026-07-23 · **Updated:** 2026-10-12
 
 ## Purpose
 `amux` is a Go terminal UI that discovers AI coding agents running in tmux panes and supported headless daemon stores, groups them by project, and provides monitoring and tmux actions.
@@ -51,3 +51,11 @@
 - `github.com/charmbracelet/bubbletea` and `github.com/charmbracelet/lipgloss` provide the TUI.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Manual Notes
+
+Notes under this heading are written by humans and preserved on regeneration.
+
+### Build Installation
+- After every successful build, always copy the built `./amux` to `/Users/ky-han/.local/bin/amux` as the final build step: `install -m 0755 ./amux /Users/ky-han/.local/bin/amux`.
+- This also applies to verification builds that override `BUILD_INSTALL_PATH`; copying only to a temporary path does not complete the build.

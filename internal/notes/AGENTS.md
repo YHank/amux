@@ -1,7 +1,7 @@
-<!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-08-20 -->
-
 # notes
+
+**Parent context:** `../AGENTS.md`
+**Generated:** 2026-07-23 · **Updated:** 2026-10-12
 
 ## Purpose
 Persists short, user-authored annotations for tracked agents in an application configuration JSON file and prunes notes when the associated agent no longer exists.
@@ -60,3 +60,7 @@ Persists short, user-authored annotations for tracked agents in an application c
 - Uses the Go standard library only: `encoding/json` (unmarshal), `errors` (ErrNotExist checks), `os` (file I/O), `path/filepath` (path construction), `syscall` (Flock advisory locking).
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Manual Notes
+
+Notes under this heading are written by humans and preserved on regeneration.

@@ -1,7 +1,7 @@
-<!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-08-20 -->
-
 # internal
+
+**Parent context:** `../AGENTS.md`
+**Generated:** 2026-07-23 · **Updated:** 2026-10-12
 
 ## Purpose
 Holds the non-public application packages: discovery and domain models, local note storage, and Bubble Tea presentation. Go's `internal` convention prevents imports from outside this repository subtree.
@@ -66,3 +66,7 @@ tmux panes + process tree + ~/.claude/jobs/ state
 - `notes` uses only the Go standard library (filesystem, JSON, syscall advisory file locking).
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Manual Notes
+
+Notes under this heading are written by humans and preserved on regeneration.

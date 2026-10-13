@@ -1,7 +1,7 @@
-<!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-08-20 -->
-
 # amux CLI
+
+**Parent context:** `../AGENTS.md`
+**Generated:** 2026-07-23 · **Updated:** 2026-10-12
 
 ## Purpose
 Implements the `amux` executable: Cobra command construction, interactive application startup via Bubble Tea, popup/status/setup-keybind subcommands, and post-TUI action dispatch for tmux attachment and Claude Code process launching.
@@ -50,3 +50,7 @@ Implements the `amux` executable: Cobra command construction, interactive applic
 - `github.com/charmbracelet/bubbletea` for TUI program runtime (imported via `internal/ui`).
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Manual Notes
+
+Notes under this heading are written by humans and preserved on regeneration.

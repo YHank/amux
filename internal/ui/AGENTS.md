@@ -1,7 +1,7 @@
-<!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-07-23 | Updated: 2026-08-20 -->
-
 # ui
+
+**Parent context:** `../AGENTS.md`
+**Generated:** 2026-07-23 · **Updated:** 2026-10-12
 
 ## Purpose
 Implements the interactive amux dashboard with Bubble Tea: application state and event updates, agent list and detail rendering, styling, and display utilities. The Model owns dashboard state (selection, filter, visibility modes, persistent preferences, notes) and interprets keyboard input; the View renders dashboard presentation; tmux actions run through deferred Bubble Tea commands while note and preference persistence occurs during state updates.
@@ -133,3 +133,7 @@ The `p`, `v`, and `m` view preferences persist to `preferences.json` across sess
 - Go standard library: `time`, `strings`, `sort`, `unicode`, `os/exec`, `os`, `path/filepath`, `encoding/json`.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Manual Notes
+
+Notes under this heading are written by humans and preserved on regeneration.
