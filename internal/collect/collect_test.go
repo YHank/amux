@@ -423,6 +423,56 @@ func TestOMOContentShowsSpinner(t *testing.T) {
 	}
 }
 
+func TestOMONativeWorkingBorder(t *testing.T) {
+	// Captured live from OmO panes working without a leading spinner and
+	// from idle/completed panes. The active border sits above the prompt.
+	working := []string{
+		"[•] Verify commands",
+		"[ ] Report results",
+		"── • Working (6s • esc to interrupt) ────────────────────",
+		"❯",
+		"──────────────────────────────────────────────────────",
+		"/project • main • $1.026 • 119K/400K (29.7%) (auto)",
+		"(😺 OmO Native by Q Kim) 🤖 5 Pursuing goal (6m)",
+	}
+	idle := []string{
+		"Finished the task.",
+		"──────────────────────────────────────────────────────",
+		"❯",
+		"──────────────────────────────────────────────────────",
+		"/project • main • $6.520 • 261K/400K (65.3%) (auto)",
+		"(😺 OmO Native by Q Kim) 🤖 5 Goal achieved (13m)",
+	}
+	oldBorder := append([]string{working[2]}, make([]string, contentSpinnerScanLines)...)
+	oldBorder[len(oldBorder)-1] = "❯"
+	cases := []struct {
+		name  string
+		lines []string
+		want  bool
+	}{
+		{"working without a spinner", working, true},
+		{"ANSI-wrapped border", []string{"\x1b[36m── • Working (3s • esc to interrupt) ──\x1b[0m", "❯"}, true},
+		{"idle after completion", idle, false},
+		{"goal text alone", []string{"❯", "(😺 OmO Native by Q Kim) 🤖 Pursuing goal (6m)"}, false},
+		{"ordinary working text", []string{"Working (6s • esc to interrupt)", "❯"}, false},
+		{"quoted border", []string{"> ── • Working (6s • esc to interrupt) ──", "❯"}, false},
+		{"missing interrupt marker", []string{"── • Working (6s) ──", "❯"}, false},
+		{"border in scrollback", oldBorder, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := contentShowsSpinner("omo", tc.lines); got != tc.want {
+				t.Fatalf("contentShowsSpinner = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	for _, tool := range []string{"omp", "claude", "opencode", "codex"} {
+		if contentShowsSpinner(tool, working) {
+			t.Errorf("OmO's working border must not mark %s as working", tool)
+		}
+	}
+}
+
 func TestContentShowsSpinner(t *testing.T) {
 	// Real omp fixtures, captured live mid-task.
 	working1 := []string{

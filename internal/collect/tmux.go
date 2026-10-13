@@ -360,11 +360,18 @@ func interactiveLife(title string) Lifecycle {
 // a wider window, is detected from its pane title instead.
 const contentSpinnerScanLines = 10
 
+// omoWorkingStatus matches OmO's active editor border. Live working panes
+// showed "── • Working (6s • esc to interrupt) ──" without a spinner; idle
+// and completed panes showed a plain border instead. Goal text in the footer
+// and the static "OmO - ..." title are not working-state signals.
+var omoWorkingStatus = regexp.MustCompile(`^─{2,}\s*•\s+Working\s+\([^)]*\besc to interrupt\)\s*─*$`)
+
 // contentShowsSpinner reports whether the trailing pane content contains a
 // verified working indicator. Oh My Pi renders a Braille spinner as the first
 // visible character of an ordinary line (for example, "⠦ Creating Claude
-// config guide ⟨esc⟩"). OpenCode keeps its spinner inside a bordered command
-// row, but renders "esc interrupt" in the active-task footer. Neither tool puts
+// config guide ⟨esc⟩"). OmO uses an active editor border, sometimes with no
+// spinner. OpenCode keeps its spinner inside a bordered command row, but
+// renders "esc interrupt" in the active-task footer. These tools do not put
 // its working signal in the tmux title, so title-only detection would leave
 // both looking idle while they work.
 func contentShowsSpinner(tool string, lines []string) bool {
@@ -377,6 +384,9 @@ func contentShowsSpinner(tool string, lines []string) bool {
 		plain := strings.TrimSpace(stripANSI(l))
 		if plain == "" {
 			continue
+		}
+		if tool == "omo" && omoWorkingStatus.MatchString(plain) {
+			return true
 		}
 		// Verified live against OpenCode 1.18.5. Keep the full two-word
 		// footer marker and scope it to OpenCode: either word alone is

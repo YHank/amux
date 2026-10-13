@@ -62,6 +62,8 @@ working right now, what's waiting on you, and what's done — grouped by project
   status row in the pane body (`Doodling… (3m 29s · ↓ 9.7k tokens)`) instead;
   omp, omo, and OpenCode get the same content-based treatment. Older Claude Code
   builds that spin their title still work unchanged.
+  OmO's `Working (... • esc to interrupt)` editor border also marks active
+  work when no spinner is shown.
 - **Live preview, in color** — the detail panel shows the selected agent's
   real terminal output with its own colors intact, refreshed every cycle,
   mux-style — not just a flat one-line status.
