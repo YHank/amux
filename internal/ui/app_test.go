@@ -1413,8 +1413,8 @@ func TestAgentRowNameIncludesTmuxWindow(t *testing.T) {
 	interactive := collect.Agent{
 		Kind: collect.KindInteractive, Name: "work:2.1", Session: "work", Window: "editor", Tool: "claude",
 	}
-	if got := agentRowName(&interactive); got != "claude (work) » editor" {
-		t.Errorf("interactive row name = %q, want %q", got, "claude (work) » editor")
+	if got := agentRowName(&interactive); got != "claude » editor" {
+		t.Errorf("interactive row name = %q, want %q", got, "claude » editor")
 	}
 
 	interactive.Tool = ""
@@ -1425,10 +1425,17 @@ func TestAgentRowNameIncludesTmuxWindow(t *testing.T) {
 	// The session name does not always match the tool running in it.
 	interactive.Tool = "claude"
 	interactive.Session = "omp-ae5ec2e"
-	if got := agentRowName(&interactive); got != "claude (omp-ae5ec2e) » editor" {
-		t.Errorf("mismatched-session row name = %q, want %q", got, "claude (omp-ae5ec2e) » editor")
+	if got := agentRowName(&interactive); got != "claude » editor" {
+		t.Errorf("mismatched-session row name = %q, want %q", got, "claude » editor")
 	}
 
+	interactive.Tool = "omo"
+	interactive.Session = "newwin-146e814f"
+	if got := agentRowName(&interactive); got != "omo » editor" {
+		t.Errorf("generated-session row name = %q, want %q", got, "omo » editor")
+	}
+
+	interactive.Tool = "claude"
 	interactive.Session = "work"
 	interactive.Window = ""
 	if got := agentRowName(&interactive); got != "claude · work:2.1" {
@@ -1454,7 +1461,7 @@ func TestRenderAgentRowIncludesWindowBeforeNote(t *testing.T) {
 	m := Model{notesStore: store}
 
 	row := m.renderAgentRow(&agent, nil, 120, false, time.Now())
-	nameAt, noteAt := strings.Index(row, "claude (work) » editor"), strings.Index(row, "» ship it")
+	nameAt, noteAt := strings.Index(row, "claude » editor"), strings.Index(row, "» ship it")
 	if nameAt < 0 || noteAt < 0 || nameAt >= noteAt {
 		t.Errorf("row = %q, want window name before note", row)
 	}
