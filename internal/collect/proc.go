@@ -229,6 +229,11 @@ func wrappedTool(args string) string {
 		if strings.HasPrefix(tok, "-") {
 			continue
 		}
+		// OMO's npm launcher now runs Senpi's bundle instead of an omo script.
+		// Match its owned package path, not arbitrary cli.js files or later args.
+		if strings.HasSuffix(tok, "/omo-ai/node_modules/@code-yeongyu/senpi/dist/bundle/cli.js") {
+			return "omo"
+		}
 		return aiTools[base(tok)]
 	}
 	return ""
