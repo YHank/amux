@@ -1467,6 +1467,34 @@ func TestRenderAgentRowIncludesWindowBeforeNote(t *testing.T) {
 	}
 }
 
+func TestRenderAgentRowHighlightsSelectedNoteInYellow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	if got := rowNoteStyle(false).GetForeground(); got != cNote {
+		t.Fatalf("unselected note foreground = %v, want %v", got, cNote)
+	}
+	if got := rowNoteStyle(true).GetForeground(); got != cYellow {
+		t.Fatalf("selected note foreground = %v, want %v", got, cYellow)
+	}
+	if !rowNoteStyle(true).GetItalic() {
+		t.Fatal("selected note style lost italic attribute")
+	}
+
+	agent := collect.Agent{
+		ID: "pane", Kind: collect.KindInteractive, Name: "work:2.1",
+		Session: "work", Window: "editor", Tool: "omo",
+	}
+	store := notes.Load()
+	store.Set(agent.ID, "ship it")
+	m := Model{notesStore: store}
+
+	selectedRow := m.renderAgentRow(&agent, nil, 120, true, time.Now())
+	if want := rowNoteStyle(true).Render("» ship it"); !strings.Contains(selectedRow, want) {
+		t.Fatalf("selected row = %q, want %q", selectedRow, want)
+	}
+}
+
 func TestSlashFilterMatchesTmuxWindow(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "")

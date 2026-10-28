@@ -371,7 +371,7 @@ func (m Model) renderAgentRow(a *collect.Agent, p *collect.Project, w int, selec
 
 	left := fmt.Sprintf("%s%s %s %s", cursor, glyph, kind, name)
 	if note := m.notesStore.Get(a.ID); note != "" {
-		left += "  " + styleNote.Render("» "+note)
+		left += "  " + rowNoteStyle(selected).Render("» "+note)
 	}
 	metaR := styleFaint.Render(meta)
 
@@ -403,6 +403,13 @@ func agentRowName(a *collect.Agent) string {
 		return name
 	}
 	return tool + " · " + name
+}
+
+func rowNoteStyle(selected bool) lipgloss.Style {
+	if selected {
+		return styleNote.Foreground(cYellow)
+	}
+	return styleNote
 }
 
 func (m Model) renderAgentRowName(a *collect.Agent, p *collect.Project, style lipgloss.Style, selected bool) string {
