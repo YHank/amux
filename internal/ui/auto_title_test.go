@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kyhan/amux/internal/collect"
+	"github.com/kyhan/amux/internal/notegen"
 	"github.com/kyhan/amux/internal/notes"
 )
 
@@ -17,39 +18,48 @@ func autoTitleTestModel(t *testing.T) Model {
 	m := Model{notesStore: notes.Load(), width: 100, height: 24, snap: projSnap(
 		collect.Agent{ID: "a", Kind: collect.KindInteractive, Life: collect.LifeWorking, Project: "/p"},
 		collect.Agent{ID: "b", Kind: collect.KindInteractive, Life: collect.LifeWorking, Project: "/p"},
-	)}
+	), noteLauncher: func(notegen.Request) (func() error, error) {
+		return func() error { return nil }, nil
+	}}
 	m.rebuildRows()
 	return m
+}
+
+func generateNote(m Model) (Model, tea.Cmd) {
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	return next.(Model), cmd
+}
+
+func completeNote(t *testing.T, m Model, request uint64, title string, err error) Model {
+	t.Helper()
+	owner := m.autoTitleRequests[request]
+	if _, saveErr := notes.Open(m.notesStore.Path()).Complete(owner.agentID, owner.token, title, err); saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	next, _ := m.Update(autoTitleMsg{agentID: owner.agentID, request: request, err: err})
+	return next.(Model)
 }
 
 func TestAutoTitleSavesOriginalAgentWhileNavigationContinues(t *testing.T) {
 	// Given
 	m := autoTitleTestModel(t)
 	owner := m.selectedAgent().ID
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	m = next.(Model)
+	m, cmd := generateNote(m)
 	request := m.noteRequest
-	defer m.cancelAutoTitles("")
-	if cmd == nil || m.fetchingNote || m.naming {
-		t.Fatal("o must launch a command without entering an input mode")
+	if cmd == nil || m.fetchingNote || m.naming || m.showNoteMenu {
+		t.Fatal("generation must leave the dashboard usable")
 	}
-	// When: navigate, open help and receive a result without Enter.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	// When
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = next.(Model)
 	selected := m.selectedAgent().ID
-	if selected == owner {
-		t.Fatal("selection did not move while a request was pending")
-	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-	next, _ = next.(Model).Update(snapshotMsg{snap: m.snap})
-	next, _ = next.(Model).Update(autoTitleMsg{agentID: owner, request: request, title: "generated title"})
-	m = next.(Model)
+	m = completeNote(t, next.(Model), request, "generated title", nil)
 	// Then
-	if !m.showHelp || m.selectedAgent().ID != selected || m.naming {
-		t.Fatal("completion interrupted the user's current UI")
-	}
-	if m.notesStore.Get(owner) != "generated title" || m.notesStore.Get(selected) != "" || len(m.autoTitleRequests) != 0 {
-		t.Fatal("completion must save only the original agent")
+	if !m.showHelp || selected == owner || m.selectedAgent().ID != selected || m.naming ||
+		m.notesStore.Get(owner) != "generated title" || m.notesStore.Get(selected) != "" {
+		t.Fatal("completion interrupted navigation or saved to the wrong agent")
 	}
 }
 
@@ -59,18 +69,10 @@ func TestAutoTitleRepeatedRequestsApplyOnlyNewestResult(t *testing.T) {
 			// Given
 			m := autoTitleTestModel(t)
 			owner := m.selectedAgent().ID
-			var ids []uint64
+			var requests []uint64
 			for range 3 {
-				next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-				m = next.(Model)
-				if cmd == nil {
-					t.Fatal("each o must emit its own asynchronous request")
-				}
-				ids = append(ids, m.noteRequest)
-			}
-			defer m.cancelAutoTitles("")
-			if len(m.autoTitleRequests) != 3 {
-				t.Fatal("repeated o requests must coexist")
+				m, _ = generateNote(m)
+				requests = append(requests, m.noteRequest)
 			}
 			// When
 			for _, i := range order {
@@ -78,12 +80,11 @@ func TestAutoTitleRepeatedRequestsApplyOnlyNewestResult(t *testing.T) {
 				if i == 2 {
 					title = "newest"
 				}
-				next, _ := m.Update(autoTitleMsg{agentID: owner, request: ids[i], title: title})
-				m = next.(Model)
+				m = completeNote(t, m, requests[i], title, nil)
 			}
 			// Then
-			if m.notesStore.Get(owner) != "newest" || len(m.autoTitleRequests) != 0 || len(m.autoTitleLatest) != 0 {
-				t.Fatal("an out-of-order older result replaced the newest request")
+			if m.notesStore.Get(owner) != "newest" || len(m.autoTitleRequests) != 0 {
+				t.Fatal("older completion replaced the newest result")
 			}
 		})
 	}
@@ -93,90 +94,79 @@ func TestAutoTitleSupportsDifferentAgentsAndFiltering(t *testing.T) {
 	// Given
 	m := autoTitleTestModel(t)
 	first := m.selectedAgent().ID
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	m = next.(Model)
+	m, _ = generateNote(m)
 	firstRequest := m.noteRequest
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = next.(Model)
 	second := m.selectedAgent().ID
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	m = next.(Model)
+	m, _ = generateNote(m)
 	secondRequest := m.noteRequest
-	defer m.cancelAutoTitles("")
-	// When: filter input continues while both results arrive.
+	// When
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-	next, _ = next.(Model).Update(autoTitleMsg{agentID: second, request: secondRequest, title: "second"})
-	next, _ = next.(Model).Update(autoTitleMsg{agentID: first, request: firstRequest, title: "first"})
-	m = next.(Model)
+	m = completeNote(t, next.(Model), secondRequest, "second", nil)
+	m = completeNote(t, m, firstRequest, "first", nil)
 	// Then
 	if !m.filtering || m.filter != "p" || m.notesStore.Get(first) != "first" || m.notesStore.Get(second) != "second" {
-		t.Fatal("concurrent completion interrupted filtering or crossed note ownership")
+		t.Fatal("completion interrupted filtering or crossed note ownership")
 	}
 }
 
-func TestAutoTitleCancellationDiscardsLateResults(t *testing.T) {
-	for _, action := range []string{"esc", "i", "I", "q", "refresh"} {
+func TestAutoTitleManualCancellationDiscardsLateResults(t *testing.T) {
+	for _, action := range []string{"esc", "i", "I", "refresh"} {
 		t.Run(action, func(t *testing.T) {
 			// Given
 			m := autoTitleTestModel(t)
 			owner := m.selectedAgent().ID
 			m.notesStore.Set(owner, "manual")
-			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-			m = next.(Model)
-			request := m.noteRequest
-			defer m.cancelAutoTitles("")
+			m, _ = generateNote(m)
+			request := m.autoTitleRequests[m.noteRequest]
 			// When
 			if action == "refresh" {
-				next, _ = m.Update(snapshotMsg{snap: collect.Snapshot{LivePaneIDs: map[string]bool{}}})
+				next, _ := m.Update(snapshotMsg{snap: collect.Snapshot{LivePaneIDs: map[string]bool{}}})
+				m = next.(Model)
 			} else {
 				key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(action)}
 				if action == "esc" {
-					key = tea.KeyMsg{Type: tea.KeyEsc}
+					key.Type = tea.KeyEsc
 				}
-				next, _ = m.Update(key)
+				next, _ := m.Update(key)
+				m = next.(Model)
 			}
-			next, _ = next.(Model).Update(autoTitleMsg{agentID: owner, request: request, title: "late"})
-			m = next.(Model)
+			applied, err := notes.Open(m.notesStore.Path()).Complete(owner, request.token, "late", nil)
 			// Then
-			want := "manual"
-			if action == "I" || action == "refresh" {
-				want = ""
-			}
-			if m.notesStore.Get(owner) != want || len(m.autoTitleRequests) != 0 {
-				t.Fatal("late result recreated or replaced a cancelled note")
+			if err != nil || applied {
+				t.Fatalf("cancelled completion applied=%v err=%v", applied, err)
 			}
 		})
 	}
 }
 
-func TestAutoTitleFailureAndChangedNotePreserveUserText(t *testing.T) {
-	for _, changed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "failure", true: "changed"}[changed], func(t *testing.T) {
-			// Given
-			m := autoTitleTestModel(t)
-			owner := m.selectedAgent().ID
-			m.notesStore.Set(owner, "manual")
-			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-			m = next.(Model)
-			msg := autoTitleMsg{agentID: owner, request: m.noteRequest, title: "generated"}
-			want := "manual"
-			if changed {
-				want = "new manual"
-				m.notesStore.Set(owner, want)
-			} else {
-				msg.err = errors.New("offline")
-			}
-			// When
-			next, _ = m.Update(msg)
-			m = next.(Model)
-			// Then
-			if m.notesStore.Get(owner) != want || m.naming || len(m.autoTitleRequests) != 0 {
-				t.Fatal("completion replaced user text or opened a modal")
-			}
-			if !changed && m.notice == "" {
-				t.Fatal("failure must be visible")
-			}
-		})
+func TestAutoTitleQuitDoesNotCancelDurableRequest(t *testing.T) {
+	// Given
+	m := autoTitleTestModel(t)
+	owner := m.selectedAgent().ID
+	m, _ = generateNote(m)
+	request := m.autoTitleRequests[m.noteRequest]
+	// When
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	applied, err := notes.Open(m.notesStore.Path()).Complete(owner, request.token, "after quit", nil)
+	// Then
+	if !next.(Model).quit || cmd == nil || err != nil || !applied || notes.Load().Get(owner) != "after quit" {
+		t.Fatalf("quit cancelled durable generation: applied=%v err=%v", applied, err)
+	}
+}
+
+func TestAutoTitleFailurePreservesUserText(t *testing.T) {
+	// Given
+	m := autoTitleTestModel(t)
+	owner := m.selectedAgent().ID
+	m.notesStore.Set(owner, "manual")
+	m, _ = generateNote(m)
+	// When
+	m = completeNote(t, m, m.noteRequest, "", errors.New("offline"))
+	// Then
+	if m.notesStore.Get(owner) != "manual" || m.naming || m.notice == "" {
+		t.Fatal("failure changed manual text or was hidden")
 	}
 }

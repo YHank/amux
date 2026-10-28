@@ -157,6 +157,7 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
 | `/` | Filter by tool, name, project, model, path, status detail, or saved note |
 | `i` / `I` | Add / edit / delete a note; for a first interactive OMP or Claude note, choose whether to prefill its tmux task title (leading `π:` / `π >` / spinner glyph stripped) |
+| `o` | Open the Codex note popup: `o` generate a note, `m` choose a model |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
 | `d` | Show / hide completed, stopped, and acknowledged-error history |
 | `p` | Toggle project-grouped and flat project-prefixed views; each remembers its own layout and restores it on entry, and both put the latest status change first |
@@ -196,6 +197,20 @@ pruned when the tmux pane closes or the background run ends. An existing pane
 keeps its note even if a refresh misses its agent process or a dashboard does
 not recognize its tool; a failed pane scan never clears notes. amux never
 touches any other tool's files.
+
+The note popup queries the installed, logged-in `codex app-server` for available
+models. Select with `j`/`k` and `Enter`; the choice stays in `note-model.json`
+beside `notes.json` until changed, independently of layout preferences.
+Before a choice is saved, Codex uses its default.
+
+Generating with `o`, then `o`, starts a detached, one-minute-bounded Codex
+worker. You can navigate, quit with `q`, or close the dashboard; the result is
+saved for the next launch. Repeating the action supersedes older requests for
+that agent, even across dashboards. Entering `i`, deleting with `I`, or pressing
+`Esc` on the selected agent invalidates pending results; cancelling the editor
+does not revive them. Request tokens live in `notes.json.requests` and share
+the note store's lock, so stale workers cannot overwrite manual edits.
+This feature requires Codex CLI on `PATH` and its existing login.
 
 ## Requirements
 

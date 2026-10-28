@@ -26,7 +26,7 @@ func main() {
 			return runTUI()
 		},
 	}
-	root.AddCommand(popupCmd(), statusCmd(), setupKeybindCmd())
+	root.AddCommand(popupCmd(), statusCmd(), setupKeybindCmd(), noteWorkerCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "amux:", err)

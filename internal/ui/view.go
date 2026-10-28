@@ -25,7 +25,7 @@ var keyboardHelpEntries = []helpEntry{
 	{"y", "confirm a pending pane kill"},
 	{"/", "filter agents"},
 	{"i / I", "add or edit / delete a note"},
-	{"o", "generate and apply a note asynchronously (repeatable)"},
+	{"o", "Codex note menu: o generate / m choose model"},
 	{"a", "acknowledge the selected error"},
 	{"d", "show or hide history"},
 	{"p", "toggle project-grouped and flat views"},
@@ -45,6 +45,9 @@ func (m Model) View() string {
 	}
 	if m.showHelp {
 		return m.renderHelpPopup()
+	}
+	if m.showNoteMenu {
+		return m.renderNoteMenu()
 	}
 	if m.loading && len(m.snap.Agents) == 0 {
 		return "scanning for AI agents…"
@@ -249,12 +252,12 @@ func (m Model) renderFooter() string {
 			styleFaint.Render("  y to confirm · any other key cancels"), m.width)
 	}
 	if m.suggestingNote {
-		hint := styleFaint.Render("  y/enter prefill · n blank · o omp · esc cancel")
+		hint := styleFaint.Render("  y/enter prefill · n blank · o Codex · esc cancel")
 		title := truncateWidth("use task title as note: "+m.suggestedNote+"?", max(0, m.width-lipgloss.Width(hint)))
 		return truncateWidth(styleTitle.Render(title)+hint, m.width)
 	}
 	if m.fetchingNote {
-		return truncateWidth(styleTitle.Render("omp: fetching purpose title...")+
+		return truncateWidth(styleTitle.Render("Codex: fetching purpose title...")+
 			styleFaint.Render("  esc to cancel"), m.width)
 	}
 	if m.composing {
@@ -270,18 +273,18 @@ func (m Model) renderFooter() string {
 	if m.filtering {
 		return truncateWidth(styleTitle.Render("/")+m.filter+styleFaint.Render("▏  (enter to apply · esc to clear)"), m.width)
 	}
-	keys := []string{"j/k move", "o title", "? help", "q quit"}
+	keys := []string{"j/k move", "o note", "? help", "q quit"}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
 	switch {
 	case m.notice != "":
 		c := cGreen
-		if strings.HasPrefix(m.notice, "send failed") || strings.HasPrefix(m.notice, "kill failed") || strings.HasPrefix(m.notice, "omp failed") {
+		if strings.HasPrefix(m.notice, "send failed") || strings.HasPrefix(m.notice, "kill failed") || strings.HasPrefix(m.notice, "Codex failed") {
 			c = cRed
 		}
 		stamp = lipgloss.NewStyle().Foreground(c).Render(m.notice)
 	case len(m.autoTitleRequests) > 0:
-		stamp = styleTitle.Render(fmt.Sprintf("omp: %d pending", len(m.autoTitleRequests)))
+		stamp = styleTitle.Render(fmt.Sprintf("Codex: %d pending", len(m.autoTitleRequests)))
 	case !m.lastRefresh.IsZero():
 		stamp = styleFaint.Render("updated " + m.lastRefresh.Format("15:04:05"))
 	}

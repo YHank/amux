@@ -116,7 +116,7 @@ func modelPath() (string, error) {
 }
 
 // SelectedModel is independent of layout preferences, so refresh cannot reset it.
-// Empty means use Codex's configured default.
+// Empty means use Codex's default.
 func SelectedModel() string {
 	path, err := modelPath()
 	if err != nil {

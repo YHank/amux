@@ -1,19 +1,30 @@
 package ui
 
 import (
-	"context"
-	"time"
+	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kyhan/amux/internal/collect"
+	"github.com/kyhan/amux/internal/notegen"
 )
 
-type autoTitleMsg purposeTitleMsg
+type autoTitleMsg struct {
+	agentID string
+	request uint64
+	err     error
+}
 
 type autoTitleRequest struct {
 	agentID string
-	note    string
-	cancel  context.CancelFunc
+	token   string
+}
+
+func launchNote(request notegen.Request) (func() error, error) {
+	cmd, err := notegen.Start(request)
+	if err != nil {
+		return nil, err
+	}
+	return cmd.Wait, nil
 }
 
 func (m Model) fetchAutoTitle(a collect.Agent) (tea.Model, tea.Cmd) {
@@ -21,20 +32,34 @@ func (m Model) fetchAutoTitle(a collect.Agent) (tea.Model, tea.Cmd) {
 		m.autoTitleRequests = make(map[uint64]autoTitleRequest)
 		m.autoTitleLatest = make(map[string]uint64)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	token, err := m.notesStore.Begin(a.ID)
+	if err != nil {
+		m.notice = "Codex failed: " + err.Error()
+		return m, nil
+	}
+	launcher := m.noteLauncher
+	if launcher == nil {
+		launcher = launchNote
+	}
+	// Start before acknowledging the key, so q cannot outrun process creation.
+	wait, err := launcher(notegen.Request{
+		StorePath: m.notesStore.Path(), Agent: a, Model: notegen.SelectedModel(), Token: token,
+	})
+	if err != nil {
+		_, saveErr := m.notesStore.Complete(a.ID, token, "", err)
+		m.notice = fmt.Sprintf("Codex failed: %v", err)
+		if saveErr != nil {
+			m.notice += ": " + saveErr.Error()
+		}
+		return m, nil
+	}
 	m.noteRequest++
 	request := m.noteRequest
-	m.autoTitleRequests[request] = autoTitleRequest{
-		agentID: a.ID,
-		note:    m.notesStore.Get(a.ID),
-		cancel:  cancel,
-	}
+	m.autoTitleRequests[request] = autoTitleRequest{agentID: a.ID, token: token}
 	m.autoTitleLatest[a.ID] = request
-	m.notice = ""
+	m.notice = "Codex note started (continues after quit)"
 	return m, func() tea.Msg {
-		defer cancel()
-		title, err := inferPurposeTitle(ctx, a)
-		return autoTitleMsg{agentID: a.ID, request: request, title: title, err: err}
+		return autoTitleMsg{agentID: a.ID, request: request, err: wait()}
 	}
 }
 
@@ -43,37 +68,36 @@ func (m Model) applyAutoTitle(msg autoTitleMsg) Model {
 	if !ok || request.agentID != msg.agentID {
 		return m
 	}
-	latest := m.autoTitleLatest[msg.agentID] == msg.request
-	request.cancel()
 	delete(m.autoTitleRequests, msg.request)
-	pending := false
-	for _, other := range m.autoTitleRequests {
-		if other.agentID == msg.agentID {
-			pending = true
-			break
-		}
-	}
-	if !pending {
-		delete(m.autoTitleLatest, msg.agentID)
-	}
-	if !latest || m.notesStore.Get(msg.agentID) != request.note {
+	if m.autoTitleLatest[msg.agentID] != msg.request {
 		return m
 	}
-	if msg.err != nil {
-		m.notice = "omp failed for " + msg.agentID + ": " + msg.err.Error()
+	delete(m.autoTitleLatest, msg.agentID)
+	state := m.notesStore.Generation(msg.agentID)
+	if state.Token != request.token {
 		return m
 	}
-	m.notesStore.Set(msg.agentID, msg.title)
-	m.notice = "omp note applied to " + msg.agentID
+	m.notesStore.Reload()
+	switch {
+	case state.Error != "":
+		m.notice = "Codex failed: " + state.Error
+	case msg.err != nil:
+		m.notice = "Codex failed: " + msg.err.Error()
+	case state.Done:
+		m.notice = "Codex note applied to " + msg.agentID
+	}
 	m.rebuildRows()
 	return m
 }
 
-// An empty agentID cancels all requests when the dashboard exits.
 func (m *Model) cancelAutoTitles(agentID string) {
+	if agentID != "" {
+		if err := m.notesStore.Cancel(agentID); err != nil {
+			m.notice = "Codex cancellation failed: " + err.Error()
+		}
+	}
 	for id, request := range m.autoTitleRequests {
 		if agentID == "" || request.agentID == agentID {
-			request.cancel()
 			delete(m.autoTitleRequests, id)
 		}
 	}

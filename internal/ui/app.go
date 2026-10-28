@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kyhan/amux/internal/collect"
+	"github.com/kyhan/amux/internal/notegen"
 	"github.com/kyhan/amux/internal/notes"
 )
 
@@ -83,6 +84,15 @@ type Model struct {
 	noteError              string
 	autoTitleRequests      map[uint64]autoTitleRequest
 	autoTitleLatest        map[string]uint64
+	noteLauncher           func(notegen.Request) (func() error, error)
+	showNoteMenu           bool
+	choosingNoteModel      bool
+	noteModels             []notegen.Model
+	noteModelIndex         int
+	modelLoading           bool
+	modelError             string
+	modelRequest           uint64
+	modelCancel            context.CancelFunc
 	naming                 bool   // capturing a note for the selected agent
 	namingAgentID          string // agent that owns the in-progress note
 	noteInput              string
@@ -311,6 +321,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case autoTitleMsg:
 		return m.applyAutoTitle(msg), nil
 
+	case noteModelsMsg:
+		if m.showNoteMenu && m.choosingNoteModel && msg.request == m.modelRequest {
+			m.modelLoading = false
+			m.noteModels = msg.models
+			m.noteModelIndex = 0
+			if msg.err != nil {
+				m.modelError = msg.err.Error()
+			} else {
+				selected := notegen.SelectedModel()
+				for i, model := range msg.models {
+					if model.Model == selected || (selected == "" && model.IsDefault) {
+						m.noteModelIndex = i
+					}
+				}
+			}
+		}
+		return m, nil
+
 	case sentMsg:
 		if msg.err != nil {
 			m.notice = "send failed: " + msg.err.Error()
@@ -373,6 +401,9 @@ func (m *Model) clearNoteSuggestion() {
 	m.suggestedNoteID = ""
 }
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.showNoteMenu {
+		return m.handleNoteMenu(msg)
+	}
 	if m.fetchingNote {
 		switch msg.String() {
 		case "esc":
@@ -535,9 +566,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.filtering = true
 	case "o":
-		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive {
-			return m.fetchAutoTitle(*a)
-		}
+		m.showNoteMenu = true
 	case "esc":
 		if a := m.selectedAgent(); a != nil {
 			m.cancelAutoTitles(a.ID)
