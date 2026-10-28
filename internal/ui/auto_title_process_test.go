@@ -35,7 +35,7 @@ func TestAutoTitleAllowsKeysWhileProcessIsPending(t *testing.T) {
 	t.Setenv("TITLE_GATE", gatePath)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	script := "#!/bin/sh\ncat > /dev/null\nprintf R > \"$TITLE_READY\"\nread token < \"$TITLE_GATE\"\nprintf 'AUTO_TITLE\\n'\n"
-	if err := os.WriteFile(filepath.Join(dir, "omp"), []byte(script), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 	started := make(chan error, 1)

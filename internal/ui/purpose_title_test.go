@@ -143,7 +143,7 @@ func TestInferPurposeTitleProcessBoundary(t *testing.T) {
 			t.Setenv("TITLE_INPUT", input)
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			script := "#!/bin/sh\ncat > \"$TITLE_INPUT\"\n" + tc.script + "\n"
-			if err := os.WriteFile(filepath.Join(dir, "omp"), []byte(script), 0755); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "codex"), []byte(script), 0755); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte("#!/bin/sh\nprintf 'ACTIVITY_SENTINEL\\n'\n"), 0755); err != nil {
@@ -191,7 +191,7 @@ func TestInferPurposeTitleLimitsPreviewOnStdin(t *testing.T) {
 				t.Setenv("TITLE_INPUT", inputPath)
 				t.Setenv("TITLE_CAPTURE", capturePath)
 				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-				if err := os.WriteFile(filepath.Join(dir, "omp"), []byte("#!/bin/sh\ncat > \"$TITLE_INPUT\"\nprintf 'title\\n'\n"), 0755); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, "codex"), []byte("#!/bin/sh\ncat > \"$TITLE_INPUT\"\nprintf 'title\\n'\n"), 0755); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte("#!/bin/sh\ncat \"$TITLE_CAPTURE\"\n"), 0755); err != nil {
