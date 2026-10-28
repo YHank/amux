@@ -8,6 +8,8 @@
 .omc/
 .claude/
 .serena/
+.omo/
+.zvec-grep/
 
 # OS
 .DS_Store
