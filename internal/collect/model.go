@@ -48,6 +48,13 @@ func (l Lifecycle) Terminal() bool {
 	}
 }
 
+// Subagent is a child task owned by an interactive agent's live session.
+type Subagent struct {
+	ID          string
+	Description string
+	Life        Lifecycle
+}
+
 // Agent is one AI agent, unified across both sources.
 type Agent struct {
 	ID   string // stable id: sessionId (background) or tmux pane id (interactive)
@@ -76,6 +83,7 @@ type Agent struct {
 	// user to pick an option — set from job state.json (background) or a live
 	// pane's own content for the choice-prompt UI (interactive).
 	NeedsInput bool
+	Subagents  []Subagent
 
 	// Interactive-only fields.
 	TmuxTarget         string   // "session:win.pane" — attach target

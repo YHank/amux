@@ -1,7 +1,9 @@
 package collect
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -78,6 +80,7 @@ const previewLines = 40
 // Agent for each match.
 func interactiveAgents(procs *procTable, panes []pane) []Agent {
 	var agents []Agent
+	home, homeErr := os.UserHomeDir()
 	for _, pn := range panes {
 		ap, ok := procs.findAgentProc(pn.pid)
 		if !ok {
@@ -92,6 +95,17 @@ func interactiveAgents(procs *procTable, panes []pane) []Agent {
 		needsInput := looksLikeChoicePrompt(tool, preview)
 		if needsInput {
 			life = LifeInput
+		}
+		var subagents []Subagent
+		if tool == "claude" && homeErr == nil {
+			var busy bool
+			subagents, busy = claudeSubagents(filepath.Join(home, ".claude"), ap, pn)
+			// Team agents can run while the main prompt is idle. Their
+			// depth-zero metadata lacks completion markers; use the live
+			// session's aggregate status instead of counting old records.
+			if life == LifeIdle && (busy || len(subagents) > 0) {
+				life = LifeWorking
+			}
 		}
 		agents = append(agents, Agent{
 			ID:                 pn.paneID,
@@ -113,6 +127,7 @@ func interactiveAgents(procs *procTable, panes []pane) []Agent {
 			Preview:            preview,
 			PreviewFingerprint: previewFingerprint(preview),
 			NeedsInput:         needsInput,
+			Subagents:          subagents,
 		})
 	}
 	return agents
@@ -366,6 +381,10 @@ const contentSpinnerScanLines = 10
 // and the static "OmO - ..." title are not working-state signals.
 var omoWorkingStatus = regexp.MustCompile(`^─{2,}\s*•\s+Working\s+\([^)]*\besc to interrupt\)\s*─*$`)
 
+// OpenCode 2.2.5 shows this footer while descendant sessions are running,
+// including when the parent prompt has no "esc interrupt" marker.
+var openCodeRunningSubagents = regexp.MustCompile(`(?:^|\s)↓\s+[1-9][0-9]*\s+subagents?\s+·`)
+
 // contentShowsSpinner reports whether the trailing pane content contains a
 // verified working indicator. Oh My Pi renders a Braille spinner as the first
 // visible character of an ordinary line (for example, "⠦ Creating Claude
@@ -391,7 +410,8 @@ func contentShowsSpinner(tool string, lines []string) bool {
 		// Verified live against OpenCode 1.18.5. Keep the full two-word
 		// footer marker and scope it to OpenCode: either word alone is
 		// ordinary terminal content, including in other agent panes.
-		if tool == "opencode" && strings.Contains(strings.ToLower(plain), "esc interrupt") {
+		if tool == "opencode" && (strings.Contains(strings.ToLower(plain), "esc interrupt") ||
+			openCodeRunningSubagents.MatchString(plain)) {
 			return true
 		}
 		if isSpinnerGlyph([]rune(plain)[0]) {
