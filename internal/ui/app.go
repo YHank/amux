@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -99,7 +98,9 @@ type Model struct {
 	composing              bool // capturing a message to send into the selected agent's pane
 	composeInput           string
 	showHelp               bool // show the keyboard-shortcuts popup
-	helpOffset             int  // first visible keyboard-help entry
+	launchMenu             launchMenuState
+	editMenu               editMenuState
+	helpOffset             int // first visible keyboard-help entry
 	initialRecencyAt       time.Time
 	initialCPU             map[string]float64 // frozen post-startup CPU tie-breakers
 	initialCPUSeeded       bool
@@ -276,6 +277,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(refreshCmd, tick())
 
 	case snapshotMsg:
+		firstSnapshot := m.loading
 		m.loading = false
 		m.lastRefresh = time.Now()
 		m.notice = "" // let any prior send/error notice expire on its own
@@ -301,6 +303,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startupPaneID = ""
 		}
 		m.persistViewPreferences()
+		if firstSnapshot {
+			m.rememberSelectedLaunchProject()
+		}
 		if m.suggestingNote || m.fetchingNote {
 			if a := m.selectedAgent(); a == nil || a.ID != m.suggestedNoteID {
 				m.clearNoteSuggestion()
@@ -313,10 +318,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.noteInput = ""
 			}
 		}
+		if m.editMenu.open && !m.editMenu.saving {
+			if a := m.selectedAgent(); a == nil || a.ID != m.editMenu.agentID {
+				m.editMenu = editMenuState{}
+			}
+		}
 		return m, nil
 
 	case purposeTitleMsg:
 		return m.applyPurposeTitle(msg), nil
+
+	case launchedMsg:
+		return m.handleLaunched(msg)
+
+	case renamedWindowMsg:
+		return m.handleRenamedWindow(msg)
 
 	case autoTitleMsg:
 		return m.applyAutoTitle(msg), nil
@@ -358,7 +374,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		before := m.selectedAgent()
+		next, cmd := m.handleKey(msg)
+		updated := next.(Model)
+		if after := updated.selectedAgent(); after != nil && (before == nil || before.ID != after.ID) {
+			updated.rememberSelectedLaunchProject()
+		}
+		return updated, cmd
 	}
 	return m, nil
 }
@@ -401,6 +423,12 @@ func (m *Model) clearNoteSuggestion() {
 	m.suggestedNoteID = ""
 }
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.launchMenu.open {
+		return m.handleLaunchMenu(msg)
+	}
+	if m.editMenu.open {
+		return m.handleEditMenu(msg)
+	}
 	if m.showNoteMenu {
 		return m.handleNoteMenu(msg)
 	}
@@ -514,6 +542,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.noteInput = ""
 		case tea.KeyBackspace:
 			m.noteInput = dropLastRune(m.noteInput)
+		case tea.KeyCtrlU:
+			m.noteInput = ""
 		case tea.KeyRunes, tea.KeySpace:
 			m.noteInput += string(msg.Runes)
 		}
@@ -574,21 +604,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		if a := m.selectedAgent(); a != nil {
 			m.cancelAutoTitles(a.ID)
-			m.noteError = ""
-			m.noteInput = m.notesStore.Get(a.ID)
-			if m.noteInput == "" {
-				if a.Kind == collect.KindInteractive && utf8.RuneCountInString(noteSuggestion(a)) <= 20 {
-					return m.fetchPurposeTitle(*a)
-				}
-				if suggestion := noteSuggestion(a); suggestion != "" {
-					m.suggestingNote = true
-					m.suggestedNote = suggestion
-					m.suggestedNoteID = a.ID
-					return m, nil
-				}
-			}
-			m.namingAgentID = a.ID
-			m.naming = true
+			m.editMenu = editMenuState{open: true, agentID: a.ID}
 		}
 	case "I":
 		if a := m.selectedAgent(); a != nil {
@@ -606,6 +622,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rebuildRows()
 		}
 	case "c":
+		return m.openLaunchMenu()
+	case "s":
 		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
 			m.composing = true
 			m.composeInput = ""

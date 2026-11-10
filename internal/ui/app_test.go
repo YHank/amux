@@ -617,7 +617,7 @@ func TestKeyboardHelpScrollsWithinSmallTerminal(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	m = next.(Model)
 	help := m.View()
-	if !strings.Contains(help, "Keyboard shortcuts") || !strings.Contains(help, "1-7 / 17") {
+	if !strings.Contains(help, "Keyboard shortcuts") || !strings.Contains(help, "1-7 / 19") {
 		t.Fatalf("first help page = %q", help)
 	}
 	lines := strings.Split(help, "\n")
@@ -635,7 +635,7 @@ func TestKeyboardHelpScrollsWithinSmallTerminal(t *testing.T) {
 	if m.helpOffset != 1 {
 		t.Fatalf("help offset = %d, want 1 after j", m.helpOffset)
 	}
-	if help = m.View(); !strings.Contains(help, "2-8 / 17") {
+	if help = m.View(); !strings.Contains(help, "2-8 / 19") {
 		t.Errorf("scrolled help page = %q", help)
 	}
 }
@@ -1330,6 +1330,7 @@ func TestSlashFilterMatchesSavedNotes(t *testing.T) {
 	// immediately, without waiting for the next agent refresh.
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
 	m.noteInput = "different note"
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1600,24 +1601,24 @@ func TestKeyboardHelpShowsSelectedAgentCapabilities(t *testing.T) {
 	}
 }
 
-// TestComposeOnlyForInteractive verifies `c` is a no-op on a background agent
+// TestComposeOnlyForInteractive verifies `s` is a no-op on a background agent
 // and enters compose mode for an interactive one.
 func TestComposeOnlyForInteractive(t *testing.T) {
 	bg := collect.Agent{ID: "b1", Kind: collect.KindBackground, Life: collect.LifeWorking, Project: "/p", Name: "b1"}
 	m := Model{snap: projSnap(bg)}
 	m.rebuildRows()
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	if next.(Model).composing {
-		t.Error("c should not enter compose mode for a background agent")
+		t.Error("s should not enter compose mode for a background agent")
 	}
 
 	inter := collect.Agent{ID: "i1", Kind: collect.KindInteractive, Life: collect.LifeWorking,
 		Project: "/p", Name: "i1", TmuxTarget: "sess:0.0"}
 	m = Model{snap: projSnap(inter)}
 	m.rebuildRows()
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	if !next.(Model).composing {
-		t.Fatal("c should enter compose mode for an interactive agent")
+		t.Fatal("s should enter compose mode for an interactive agent")
 	}
 }
 
@@ -1629,7 +1630,7 @@ func TestComposeEnterSendsAndExits(t *testing.T) {
 	m := Model{snap: projSnap(inter)}
 	m.rebuildRows()
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	mm := next.(Model)
 
 	next, _ = mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
@@ -1659,7 +1660,7 @@ func TestComposeEscCancelsWithoutSending(t *testing.T) {
 	m := Model{snap: projSnap(inter)}
 	m.rebuildRows()
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("nope")})
 	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
 	mm := next.(Model)
@@ -1679,7 +1680,7 @@ func TestComposeEnterWithEmptyTextDoesNotSend(t *testing.T) {
 	m := Model{snap: projSnap(inter)}
 	m.rebuildRows()
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
 		t.Error("enter with an empty draft should not send")
@@ -1749,6 +1750,7 @@ func TestFirstInteractiveClaudeNoteOffersStrippedTitleAsPrefill(t *testing.T) {
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
 	if !m.suggestingNote || m.naming {
 		t.Fatalf("first Claude note should ask before editing: suggesting=%v naming=%v", m.suggestingNote, m.naming)
@@ -1781,6 +1783,7 @@ func TestFirstInteractiveCodexNoteOffersTitleAsPrefill(t *testing.T) {
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
 	if !m.suggestingNote || m.naming || m.suggestedNote != title {
 		t.Fatalf("first Codex note should suggest the pane title: suggesting=%v naming=%v title=%q", m.suggestingNote, m.naming, m.suggestedNote)
@@ -1796,6 +1799,7 @@ func TestFirstInteractiveCodexNoteOffersTitleAsPrefill(t *testing.T) {
 		t.Fatalf("saved note = %q, want %q", got, title)
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
 	if m.suggestingNote || !m.naming || m.noteInput != title {
 		t.Fatalf("existing Codex note should open directly for editing")
@@ -1815,6 +1819,7 @@ func TestFirstInteractiveOMONoteOffersTitleAsPrefill(t *testing.T) {
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
 	const want = "텍스트를 한글로 번역하는 기능 구현 - project"
 	if !m.suggestingNote || m.naming || m.suggestedNote != want {
@@ -1844,6 +1849,7 @@ func TestFirstInteractiveOMPNoteOffersTitleAsPrefill(t *testing.T) {
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
 	if !m.suggestingNote || m.naming {
 		t.Fatalf("first OMP note should ask before editing: suggesting=%v naming=%v", m.suggestingNote, m.naming)
@@ -1878,6 +1884,7 @@ func TestEnterAcceptsOMPTitleSuggestion(t *testing.T) {
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(Model)
 	if m.suggestingNote || !m.naming {
@@ -1900,6 +1907,7 @@ func TestOMPSuggestedNoteEscCancels(t *testing.T) {
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(Model)
 	if m.suggestingNote || m.naming || m.noteInput != "" {
@@ -1926,6 +1934,7 @@ func TestOMPSuggestedNoteIgnoresOtherKeysAndCancelsAfterPaneRefresh(t *testing.T
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = next.(Model)
 	if !m.suggestingNote || m.naming {
@@ -1959,6 +1968,7 @@ func TestAcceptedOMPSuggestedNoteCancelsIfSourcePaneDisappears(t *testing.T) {
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = next.(Model)
 	if !m.naming || m.namingAgentID != "omp-pane" {
@@ -1988,6 +1998,7 @@ func TestOMPSuggestedNoteCanBeDeclinedAndDoesNotRepeatForExistingNote(t *testing
 	m.rebuildRows()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = next.(Model)
 	if m.suggestingNote || !m.naming || m.noteInput != "" {
@@ -1998,6 +2009,7 @@ func TestOMPSuggestedNoteCanBeDeclinedAndDoesNotRepeatForExistingNote(t *testing
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(Model)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
 	if m.suggestingNote || !m.naming {
 		t.Fatalf("existing OMP note should open directly: suggesting=%v naming=%v", m.suggestingNote, m.naming)
@@ -2288,6 +2300,7 @@ func TestOMONoteSurvivesRefreshFromDashboardWithoutToolRecognition(t *testing.T)
 	m := Model{snap: projSnap(agent), notesStore: notes.Load()}
 	m.rebuildRows()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("번역 작업 확인")})
 	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})

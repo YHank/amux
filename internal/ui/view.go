@@ -20,11 +20,13 @@ var keyboardHelpEntries = []helpEntry{
 	{"J / K", "move projects in grouped view"},
 	{"g / G", "jump to first / last"},
 	{"enter", "attach a pane or manage a live Claude agent"},
-	{"c", "send text to the selected interactive pane"},
+	{"s", "send text to the selected interactive pane"},
+	{"c", "launch an agent in a project directory"},
 	{"x", "kill an interactive pane or dismiss a background agent"},
 	{"y", "confirm a pending pane kill"},
 	{"/", "filter agents"},
-	{"i / I", "add or edit / delete a note"},
+	{"i", "edit popup: t window title / i note"},
+	{"I", "delete the selected note"},
 	{"o", "Codex note menu: o generate / m choose model"},
 	{"a", "acknowledge the selected error"},
 	{"d", "show or hide history"},
@@ -45,6 +47,12 @@ func (m Model) View() string {
 	}
 	if m.showHelp {
 		return m.renderHelpPopup()
+	}
+	if m.launchMenu.open {
+		return m.renderLaunchMenu()
+	}
+	if m.editMenu.open || m.naming || m.suggestingNote || m.fetchingNote {
+		return m.renderEditPopup()
 	}
 	if m.showNoteMenu {
 		return m.renderNoteMenu()
@@ -273,7 +281,7 @@ func (m Model) renderFooter() string {
 	if m.filtering {
 		return truncateWidth(styleTitle.Render("/")+m.filter+styleFaint.Render("▏  (enter to apply · esc to clear)"), m.width)
 	}
-	keys := []string{"j/k move", "o note", "? help", "q quit"}
+	keys := []string{"j/k move", "s send", "c new", "i edit", "? help", "q quit"}
 	help := styleHelp.Render(strings.Join(keys, "  ·  "))
 	stamp := ""
 	switch {

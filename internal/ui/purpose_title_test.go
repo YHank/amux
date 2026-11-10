@@ -34,7 +34,8 @@ func TestPurposeTitleAutomaticallyFetchesAtTwentyRunes(t *testing.T) {
 			m := Model{snap: projSnap(a)}
 			m.rebuildRows()
 			// When
-			next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+			next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 			got := next.(Model)
 			defer got.clearNoteSuggestion()
 			// Then
@@ -54,6 +55,7 @@ func TestPurposeTitleManualFetchOpensEditableNoteAndSaves(t *testing.T) {
 	m := Model{snap: projSnap(a), notesStore: notes.Load()}
 	m.rebuildRows()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	// When
 	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
 	m = next.(Model)
@@ -68,7 +70,8 @@ func TestPurposeTitleManualFetchOpensEditableNoteAndSaves(t *testing.T) {
 	if got := m.notesStore.Get(a.ID); got != "학생 검색 개선 작업" {
 		t.Fatalf("saved note = %q", got)
 	}
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, cmd = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	if got := next.(Model); !got.naming || got.fetchingNote || cmd != nil {
 		t.Fatal("existing note must open directly")
 	}
@@ -83,6 +86,7 @@ func TestPurposeTitleDiscardsCancelledAndStaleResults(t *testing.T) {
 			m := Model{snap: projSnap(a)}
 			m.rebuildRows()
 			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+			next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 			m = next.(Model)
 			oldRequest := m.noteRequest
 			switch action {
@@ -94,6 +98,7 @@ func TestPurposeTitleDiscardsCancelledAndStaleResults(t *testing.T) {
 			m = next.(Model)
 			if action == "retry" {
 				next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+				next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 				m = next.(Model)
 			}
 			defer m.clearNoteSuggestion()
@@ -115,6 +120,7 @@ func TestPurposeTitleFailureKeepsManualInputAvailable(t *testing.T) {
 	m := Model{snap: projSnap(a)}
 	m.rebuildRows()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = next.(Model)
 	// When
 	next, _ = m.Update(purposeTitleMsg{agentID: a.ID, request: m.noteRequest, err: errors.New("offline")})

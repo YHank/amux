@@ -67,7 +67,7 @@ working right now, what's waiting on you, and what's done — grouped by project
 - **Live preview, in color** — the detail panel shows the selected agent's
   real terminal output with its own colors intact, refreshed every cycle,
   mux-style — not just a flat one-line status.
-- **Act at the point of attention** — press `c` to reply directly to an
+- **Act at the point of attention** — press `s` to reply directly to an
   interactive pane. For a live headless Claude job, `Enter` opens Claude's
   native agent manager. amux never writes to Claude's private daemon state or
   socket.
@@ -89,7 +89,9 @@ working right now, what's waiting on you, and what's done — grouped by project
   the order each view last showed instead of picking one and visibly resorting
   a refresh later. Grouped and flat layouts are remembered separately, and `p`
   brings each back as you left it.
-- **Your own notes, local to amux** — press `i` to jot a short note on any
+- **Edit from a popup** — press `i`, then `t` to rename the selected tmux
+  window (the title displayed after the tool name), or `i` again to edit its note.
+- **Your own notes, local to amux** — press `i` then `i` to jot a short note on any
   agent (why it's running, what you're waiting on), or `I` to delete its
   existing note; notes are saved to disk, shown in the list and detail panel,
   and never written back to tmux/Claude/omp/omo. For a first note on an interactive
@@ -153,10 +155,12 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `J` / `K` | Move to the first visible agent in the next / previous project |
 | `g` / `G` | Jump to first / last |
 | `Enter` | Attach interactive panes or open Claude agents for a live headless session |
-| `c` | Compose a message and send it into an interactive agent's pane |
+| `s` | Compose a message and send it into an interactive agent's pane |
+| `c` | Choose a project directory or enter a path, then launch claude, codex, omo, omp, or opencode in a new tmux window |
 | `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
 | `/` | Filter by tool, name, project, model, path, status detail, or saved note |
-| `i` / `I` | Add / edit / delete a note; for a first interactive OMP or Claude note, choose whether to prefill its tmux task title (leading `π:` / `π >` / spinner glyph stripped) |
+| `i` | Open the edit popup: `t` edits the tmux window title, `i` edits the note; `Ctrl+U` clears the input |
+| `I` | Delete the selected agent's note |
 | `o` | Open the Codex note popup: `o` generate a note, `m` choose a model |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
 | `d` | Show / hide completed, stopped, and acknowledged-error history |
@@ -191,7 +195,14 @@ state:
 - Oh My Pi: `~/.omp/run/daemons/*/daemons/*/meta.json`; liveness from the
   owning client's pid in the sibling `clients/*.json` registry.
 
-Notes you add with `i` live in their own file (`$XDG_CONFIG_HOME/amux/notes.json`,
+The `c` popup remembers selected project directories in `launch-history.json`
+beside `preferences.json`. Use Up/Down to pick a previous directory, edit the
+path directly (`Ctrl+U` clears it), then press Enter to choose an agent.
+Enter launches it in a new window in the selected agent's tmux session, using
+the same directory and command behavior as the configured prefix + `c` menu.
+Only `claude`, `codex`, `omo`, `omp`, and `opencode` are offered.
+
+Notes you add with `i` then `i` live in their own file (`$XDG_CONFIG_HOME/amux/notes.json`,
 or the platform equivalent via `os.UserConfigDir()`), keyed by agent ID and
 pruned when the tmux pane closes or the background run ends. An existing pane
 keeps its note even if a refresh misses its agent process or a dashboard does
