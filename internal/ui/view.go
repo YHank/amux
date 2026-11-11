@@ -447,6 +447,15 @@ func (m Model) renderAgentRowName(a *collect.Agent, p *collect.Project, style li
 // agentMeta builds the compact right-hand metadata string for a row.
 func agentMeta(a *collect.Agent, now time.Time) string {
 	parts := []string{}
+	running := 0
+	for _, child := range a.Subagents {
+		if child.Life == collect.LifeWorking {
+			running++
+		}
+	}
+	if running > 0 {
+		parts = append(parts, fmt.Sprintf("sub:%d", running))
+	}
 	if a.Model != "" {
 		parts = append(parts, a.Model)
 	}
@@ -505,6 +514,19 @@ func (m Model) renderDetail(w, h int) string {
 	}
 	if age := a.Age(now); age > 0 {
 		kv("updated", humanDuration(age)+" ago")
+	}
+
+	if len(a.Subagents) > 0 {
+		b.WriteString("\n" + styleDetailKey.Render("subagents") + "\n")
+		for _, child := range a.Subagents {
+			label := child.Description
+			if label == "" {
+				label = child.ID
+			}
+			status := lipgloss.NewStyle().Foreground(lifeColor(child.Life)).
+				Render(lifeGlyph(child.Life) + " " + lifeLabel(child.Life))
+			b.WriteString(truncateWidth(status+" · "+strings.Join(strings.Fields(label), " "), w) + "\n")
+		}
 	}
 
 	if a.Kind == collect.KindInteractive {

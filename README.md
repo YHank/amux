@@ -67,6 +67,9 @@ working right now, what's waiting on you, and what's done — grouped by project
 - **Live preview, in color** — the detail panel shows the selected agent's
   real terminal output with its own colors intact, refreshed every cycle,
   mux-style — not just a flat one-line status.
+- **Claude subagents** — the parent row shows `sub:N` for running child
+  agents, and the detail panel lists their tasks and states. Child activity
+  keeps an otherwise idle parent marked as working.
 - **Act at the point of attention** — press `s` to reply directly to an
   interactive pane. For a live headless Claude job, `Enter` opens Claude's
   native agent manager. amux never writes to Claude's private daemon state or
