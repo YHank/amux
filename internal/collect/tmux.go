@@ -268,7 +268,7 @@ const choicePromptScanLines = 8
 // agent mid-question, blocked on the user picking one of several options.
 // Verified footers currently include Claude Code's
 // "Enter to select · ↑/↓ to navigate · Esc to cancel" and OpenCode's
-// "↑↓ select  enter submit  esc dismiss".
+// "↑↓ select  enter submit  esc dismiss", plus OmO's question navigation footer.
 //
 // The footer is the signal: ordinary idle/typing screens share prompt glyphs
 // and words with question screens but not the full interaction instructions.
@@ -277,6 +277,13 @@ func looksLikeChoicePrompt(tool string, lines []string) bool {
 	for _, l := range trailingLines(lines, choicePromptScanLines) {
 		plain := stripANSI(l)
 		if strings.Contains(plain, "Enter to select") && strings.Contains(plain, "navigate") {
+			return true
+		}
+		if tool == "omo" &&
+			strings.Contains(plain, "↑↓ move") &&
+			strings.Contains(plain, "space select") &&
+			strings.Contains(plain, "tab next question") &&
+			strings.Contains(plain, "esc cancel") {
 			return true
 		}
 		if tool == "opencode" {
