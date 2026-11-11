@@ -274,6 +274,9 @@ const choicePromptScanLines = 8
 // and words with question screens but not the full interaction instructions.
 // Matching the complete instruction combination keeps detection conservative.
 func looksLikeChoicePrompt(tool string, lines []string) bool {
+	if tool == "omo" && omoHasPendingQuestion(lines) {
+		return true
+	}
 	for _, l := range trailingLines(lines, choicePromptScanLines) {
 		plain := stripANSI(l)
 		if strings.Contains(plain, "Enter to select") && strings.Contains(plain, "navigate") {
