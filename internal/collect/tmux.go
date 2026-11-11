@@ -1,9 +1,7 @@
 package collect
 
 import (
-	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -75,63 +73,6 @@ func parsePaneLine(line string) (pane, bool) {
 // per refresh — enough to reliably contain a choice-prompt block and to fill
 // the detail panel, cheap enough to fetch every cycle for a handful of panes.
 const previewLines = 40
-
-// interactiveAgents scans every pane for a foreground AI process and builds an
-// Agent for each match.
-func interactiveAgents(procs *procTable, panes []pane) []Agent {
-	var agents []Agent
-	home, homeErr := os.UserHomeDir()
-	for _, pn := range panes {
-		ap, ok := procs.findAgentProc(pn.pid)
-		if !ok {
-			continue
-		}
-		tool := detectTool(ap)
-		preview := capturePane(pn.target, previewLines)
-		life := interactiveLife(pn.title)
-		if life == LifeIdle && contentShowsSpinner(tool, preview) {
-			life = LifeWorking
-		}
-		needsInput := looksLikeChoicePrompt(tool, preview)
-		if needsInput {
-			life = LifeInput
-		}
-		var subagents []Subagent
-		if tool == "claude" && homeErr == nil {
-			var busy bool
-			subagents, busy = claudeSubagents(filepath.Join(home, ".claude"), ap, pn)
-			// Team agents can run while the main prompt is idle. Their
-			// depth-zero metadata lacks completion markers; use the live
-			// session's aggregate status instead of counting old records.
-			if life == LifeIdle && (busy || len(subagents) > 0) {
-				life = LifeWorking
-			}
-		}
-		agents = append(agents, Agent{
-			ID:                 pn.paneID,
-			Window:             pn.window,
-			Kind:               KindInteractive,
-			Tool:               tool,
-			Name:               pn.target,
-			Life:               life,
-			State:              "live",
-			Detail:             titleOrCmd(pn.title, ap),
-			CWD:                pn.path,
-			Project:            projectKey(pn.path),
-			ProcessStartedAt:   ap.startedAt,
-			TmuxTarget:         pn.target,
-			Session:            pn.session,
-			PaneTitle:          pn.title,
-			PID:                ap.pid,
-			CPU:                procs.subtreeCPU(ap.pid),
-			Preview:            preview,
-			PreviewFingerprint: previewFingerprint(preview),
-			NeedsInput:         needsInput,
-			Subagents:          subagents,
-		})
-	}
-	return agents
-}
 
 // paneIDs preserves notes for existing panes independently of tool detection.
 func paneIDs(panes []pane) map[string]bool {

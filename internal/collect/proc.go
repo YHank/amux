@@ -2,6 +2,7 @@ package collect
 
 import (
 	"bufio"
+	"bytes"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -52,8 +53,8 @@ func snapshotProcs() (*procTable, error) {
 		return nil, err
 	}
 	t := &procTable{byPID: map[int]proc{}, children: map[int][]int{}}
-	sc := bufio.NewScanner(strings.NewReader(string(out)))
-	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
 		p, ok := parseProcLine(sc.Text(), capturedAt)
 		if !ok {
