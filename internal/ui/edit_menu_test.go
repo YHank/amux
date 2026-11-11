@@ -17,62 +17,99 @@ import (
 )
 
 func TestWindowTitlePopupRenamesOnlyCapturedWindow(t *testing.T) {
-	tmux, err := exec.LookPath("tmux")
-	if err != nil {
-		t.Skip("tmux is required for the isolated rename boundary test")
-	}
-	dir, err := os.MkdirTemp("/tmp", "amux-rename-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Error(err)
-		}
-	})
-	socket := filepath.Join(dir, "tmux.sock")
-	t.Setenv("TMUX", socket+",0,0")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	call := func(args ...string) string {
-		t.Helper()
-		out, err := exec.CommandContext(ctx, tmux, append([]string{"-S", socket}, args...)...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("tmux: %v: %s", err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	pane := call("-f", "/dev/null", "new-session", "-d", "-s", "rename-test", "-n", "original", "-P", "-F", "#{pane_id}", "/bin/sh")
-	t.Cleanup(func() {
-		cleanup, stop := context.WithTimeout(context.Background(), 3*time.Second)
-		defer stop()
-		if out, err := exec.CommandContext(cleanup, tmux, "-S", socket, "kill-server").CombinedOutput(); err != nil {
-			t.Errorf("cleanup tmux: %v: %s", err, out)
-		}
-	})
-	other := call("new-window", "-t", "=rename-test:", "-n", "other", "-P", "-F", "#{pane_id}", "/bin/sh")
-	a := collect.Agent{ID: pane, Kind: collect.KindInteractive, Life: collect.LifeIdle,
-		Project: dir, Session: "rename-test", Window: "original", TmuxTarget: "rename-test:0.0"}
-	m := Model{snap: projSnap(a), width: 80, height: 24}
-	m.rebuildRows()
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
-	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyCtrlU})
-	const title = "-새 제목 ; $HOME #{session_name}"
-	next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(title)})
-	next, cmd := next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("title save did not issue a command")
-	}
-	next, _ = next.(Model).Update(cmd())
-	if got := call("display-message", "-p", "-t", pane, "#{window_name}"); got != title {
-		t.Fatalf("renamed title = %q, want literal %q", got, title)
-	}
-	if got := call("display-message", "-p", "-t", other, "#{window_name}"); got != "other" {
-		t.Fatalf("unselected window was renamed: %q", got)
-	}
-	if next.(Model).editMenu.open {
-		t.Fatal("successful rename left popup open")
+	for _, action := range []string{"edit title", "clear note", "start", "select preset", "complete preset"} {
+		t.Run(action, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("XDG_CONFIG_HOME", "")
+			tmux, err := exec.LookPath("tmux")
+			if err != nil {
+				t.Skip("tmux is required for the isolated rename boundary test")
+			}
+			dir, err := os.MkdirTemp("/tmp", "amux-rename-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.RemoveAll(dir); err != nil {
+					t.Error(err)
+				}
+			})
+			socket := filepath.Join(dir, "tmux.sock")
+			t.Setenv("TMUX", socket+",0,0")
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			call := func(args ...string) string {
+				t.Helper()
+				out, err := exec.CommandContext(ctx, tmux, append([]string{"-S", socket}, args...)...).CombinedOutput()
+				if err != nil {
+					t.Fatalf("tmux: %v: %s", err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			pane := call("-f", "/dev/null", "new-session", "-d", "-s", "rename-test", "-n", "original", "-P", "-F", "#{pane_id}", "/bin/sh")
+			t.Cleanup(func() {
+				cleanup, stop := context.WithTimeout(context.Background(), 3*time.Second)
+				defer stop()
+				if out, err := exec.CommandContext(cleanup, tmux, "-S", socket, "kill-server").CombinedOutput(); err != nil {
+					t.Errorf("cleanup tmux: %v: %s", err, out)
+				}
+			})
+			other := call("new-window", "-t", "=rename-test:", "-n", "other", "-P", "-F", "#{pane_id}", "/bin/sh")
+			a := collect.Agent{ID: pane, Kind: collect.KindInteractive, Life: collect.LifeIdle,
+				Project: dir, Session: "rename-test", Window: "original", TmuxTarget: "rename-test:0.0"}
+			store := notes.Load()
+			store.Set(a.ID, "existing note")
+			m := Model{snap: projSnap(a), notesStore: store, width: 80, height: 24}
+			m.rebuildRows()
+			var next tea.Model
+			var cmd tea.Cmd
+			title := "-새 제목 ; $HOME #{session_name}"
+			switch action {
+			case "clear note":
+				title = "stay"
+				m.filter = "existing note"
+				m.rebuildRows()
+				next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'I'}})
+				if got := notes.Load().Get(a.ID); got != "" {
+					t.Fatalf("cleared note = %q", got)
+				}
+			case "start":
+				title = "start"
+				next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+				if !next.(Model).showNoteMenu || notes.Load().Get(a.ID) != "existing note" {
+					t.Fatal("o must open the note menu without clearing the note")
+				}
+			default:
+				next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+				next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+				next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+				switch action {
+				case "select preset":
+					title = "stay"
+					next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyDown})
+				case "complete preset":
+					title = "review"
+					next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("reviw")})
+					next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyTab})
+				default:
+					next, _ = next.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(title)})
+				}
+				next, cmd = next.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+			}
+			if cmd == nil {
+				t.Fatal("title save did not issue a command")
+			}
+			next, _ = next.(Model).Update(cmd())
+			if got := call("display-message", "-p", "-t", pane, "#{window_name}"); got != title {
+				t.Fatalf("renamed title = %q, want literal %q", got, title)
+			}
+			if got := call("display-message", "-p", "-t", other, "#{window_name}"); got != "other" {
+				t.Fatalf("unselected window was renamed: %q", got)
+			}
+			if next.(Model).editMenu.open {
+				t.Fatal("successful rename left popup open")
+			}
+		})
 	}
 }
 
@@ -101,6 +138,34 @@ func TestEditPopupChoosesNoteWithoutChangingWindowTitle(t *testing.T) {
 	}
 	if m.selectedAgent().Window != "original" || m.naming {
 		t.Fatal("editing a note changed the window or left the editor open")
+	}
+}
+
+func TestClearNoteWithoutTmuxPane(t *testing.T) {
+	for _, kind := range []collect.Kind{collect.KindBackground, collect.KindInteractive} {
+		t.Run(string(kind), func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("XDG_CONFIG_HOME", "")
+			a := collect.Agent{ID: "agent", Kind: kind, Life: collect.LifeIdle, Project: "/p"}
+			store := notes.Load()
+			store.Set(a.ID, "existing note")
+			m := Model{snap: projSnap(a), notesStore: store}
+			m.rebuildRows()
+
+			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'I'}})
+
+			if cmd != nil || notes.Load().Get(a.ID) != "" {
+				t.Fatal("clearing a note without a pane must not rename a window")
+			}
+		})
+	}
+}
+
+func TestClearNoteTitleFailureIsVisible(t *testing.T) {
+	m := Model{width: 80, height: 24}
+	next, _ := m.Update(renamedWindowMsg{err: errors.New("pane closed: missing target")})
+	if !strings.Contains(next.(Model).View(), "pane closed") {
+		t.Fatalf("title failure outside the edit popup must be visible: notice=%q view=%q", next.(Model).notice, next.(Model).View())
 	}
 }
 

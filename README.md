@@ -163,8 +163,8 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
 | `/` | Filter by tool, name, project, model, path, status detail, or saved note |
 | `i` | Open the edit popup: `t` edits the tmux window title, `i` edits the note; `Ctrl+U` clears the input |
-| `I` | Delete the selected agent's note |
-| `o` | Open the Codex note popup: `o` generate a note, `m` choose a model |
+| `I` | Delete the selected agent's note and set its tmux window title to `stay` |
+| `o` | Set the tmux window title to `start` and open the Codex note popup: `o` generate a note, `m` choose a model |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
 | `d` | Show / hide completed, stopped, and acknowledged-error history |
 | `p` | Toggle project-grouped and flat project-prefixed views; each remembers its own layout and restores it on entry, and both put the latest status change first |
@@ -173,6 +173,14 @@ amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 | `m` | Show / hide the detail and terminal-preview pane |
 | `?` | Show keyboard shortcuts; press `?` or `Esc` to close |
 | `q` | Quit |
+
+The `i` → `t` popup keeps the title input above a selectable list. Use `↑` / `↓`
+to choose a title and `Enter` to apply it, or type a custom title. `Tab` replaces
+the input with the closest saved title (exact, prefix, substring, then edit
+distance; ties keep list order). `Ctrl+N` adds the current input to the list;
+`Ctrl+D` deletes the highlighted item. The initial list is `start`, `stay`,
+`review`, `commit`, `gitedit`, `end`. Changes persist in `window-titles.json`
+inside the amux user configuration directory, including an intentionally empty list.
 
 ### tmux status bar
 

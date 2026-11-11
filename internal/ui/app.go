@@ -603,6 +603,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 	case "o":
 		m.showNoteMenu = true
+		if a := m.selectedAgent(); a != nil {
+			return m, renameAgentWindow(*a, "start")
+		}
 	case "esc":
 		if a := m.selectedAgent(); a != nil {
 			m.cancelAutoTitles(a.ID)
@@ -613,11 +616,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.editMenu = editMenuState{open: true, agentID: a.ID}
 		}
 	case "I":
-		if a := m.selectedAgent(); a != nil {
-			m.cancelAutoTitles(a.ID)
-			m.notesStore.Set(a.ID, "")
-			m.rebuildRows()
-		}
+		return m.clearSelectedNote()
 	case "a":
 		if a := m.selectedAgent(); a != nil && a.Life == collect.LifeError {
 			if m.acknowledged == nil {

@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,19 +14,35 @@ import (
 )
 
 type editMenuState struct {
-	open    bool
-	agentID string
-	title   bool
-	input   string
-	target  string
-	saving  bool
-	err     string
+	open       bool
+	agentID    string
+	title      bool
+	input      string
+	target     string
+	saving     bool
+	err        string
+	presets    []string
+	index      int
+	presetsErr string
 }
 
 type renamedWindowMsg struct {
-	target string
-	title  string
-	err    error
+	target    string
+	title     string
+	err       error
+	automatic bool
+}
+
+func (m Model) clearSelectedNote() (tea.Model, tea.Cmd) {
+	a := m.selectedAgent()
+	if a == nil {
+		return m, nil
+	}
+	cmd := renameAgentWindow(*a, "stay")
+	m.cancelAutoTitles(a.ID)
+	m.notesStore.Set(a.ID, "")
+	m.rebuildRows()
+	return m, cmd
 }
 
 func (m Model) beginNoteEdit() (tea.Model, tea.Cmd) {
@@ -83,30 +98,31 @@ func (m Model) handleEditMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(a.ID, "%") {
 				m.editMenu.target = a.ID
 			}
+			presets, err := loadTitlePresets(defaultTitlePresetsPath())
+			m.editMenu.presets = presets
+			m.editMenu.index = closestTitle(m.editMenu.input, presets)
+			if err != nil {
+				m.editMenu.presetsErr = err.Error()
+				m.editMenu.err = err.Error()
+			}
 		}
 		return m, nil
 	}
-	switch msg.Type {
-	case tea.KeyEnter:
-		title := strings.TrimSpace(m.editMenu.input)
-		if title == "" || strings.ContainsFunc(title, unicode.IsControl) {
-			m.editMenu.err = "Enter a non-empty, single-line title"
-			return m, nil
-		}
-		m.editMenu.saving = true
-		m.editMenu.err = ""
-		return m, renameWindow(m.editMenu.target, title)
-	case tea.KeyBackspace:
-		m.editMenu.input = dropLastRune(m.editMenu.input)
-	case tea.KeyCtrlU:
-		m.editMenu.input = ""
-	case tea.KeyRunes, tea.KeySpace:
-		m.editMenu.input += string(msg.Runes)
-	}
-	return m, nil
+	return m.handleTitlePicker(msg)
 }
 
-func renameWindow(target, title string) tea.Cmd {
+func renameAgentWindow(a collect.Agent, title string) tea.Cmd {
+	if a.Kind != collect.KindInteractive || a.TmuxTarget == "" {
+		return nil
+	}
+	target := a.TmuxTarget
+	if strings.HasPrefix(a.ID, "%") {
+		target = a.ID
+	}
+	return renameWindow(target, title, true)
+}
+
+func renameWindow(target, title string, automatic bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -116,30 +132,35 @@ func renameWindow(target, title string) tea.Cmd {
 		if err != nil {
 			err = fmt.Errorf("rename window: %w: %s", err, strings.TrimSpace(string(out)))
 		}
-		return renamedWindowMsg{target: target, title: title, err: err}
+		return renamedWindowMsg{target: target, title: title, err: err, automatic: automatic}
 	}
 }
 
 func (m Model) handleRenamedWindow(msg renamedWindowMsg) (tea.Model, tea.Cmd) {
+	editing := !msg.automatic && m.editMenu.saving && m.editMenu.target == msg.target
 	if msg.err != nil {
+		if !editing {
+			m.notice = msg.err.Error()
+			return m, nil
+		}
 		m.editMenu.saving = false
 		m.editMenu.err = msg.err.Error()
 		return m, nil
 	}
-	m.editMenu = editMenuState{}
+	if editing {
+		m.editMenu = editMenuState{}
+	}
 	m.notice = "window title: " + msg.title
 	return m, refreshCmd
 }
 
 func (m Model) renderEditPopup() string {
+	if m.editMenu.title {
+		return m.renderTitlePicker()
+	}
 	w := min(76, m.width-2)
 	lines := []string{"Edit selected agent", "t  window title", "i  note", "esc cancel"}
 	switch {
-	case m.editMenu.title:
-		lines = []string{"Window title", popupInputTail(m.editMenu.input, w-4), "enter save | ctrl+u clear | esc cancel"}
-		if m.editMenu.saving {
-			lines[2] = "Saving window title..."
-		}
 	case m.fetchingNote:
 		lines = []string{"Edit note", "Codex: fetching purpose title...", "esc cancel"}
 	case m.suggestingNote:
