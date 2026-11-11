@@ -13,6 +13,9 @@ import (
 func performAction(a *ui.Action) error {
 	switch a.Kind {
 	case "attach":
+		if a.Popup {
+			return attachPopup(a)
+		}
 		return attachTmux(a)
 	case "manage":
 		return launchClaudeAction(a)

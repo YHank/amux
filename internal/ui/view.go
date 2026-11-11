@@ -54,6 +54,9 @@ func (m Model) View() string {
 	if m.editMenu.open || m.naming || m.suggestingNote || m.fetchingNote {
 		return m.renderEditPopup()
 	}
+	if m.moveAction != nil {
+		return m.renderMoveMenu()
+	}
 	if m.showNoteMenu {
 		return m.renderNoteMenu()
 	}

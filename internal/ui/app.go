@@ -31,6 +31,7 @@ type Action struct {
 	TmuxTarget string // for attach
 	Session    string // for attach when not already inside tmux
 	CWD        string
+	Popup      bool // attach inside a popup instead of switching the parent client
 }
 
 // rowKind tags each rendered line so the cursor can skip headers.
@@ -98,6 +99,8 @@ type Model struct {
 	composing              bool // capturing a message to send into the selected agent's pane
 	composeInput           string
 	showHelp               bool // show the keyboard-shortcuts popup
+	moveAction             *Action
+	movePopup              bool
 	launchMenu             launchMenuState
 	editMenu               editMenuState
 	helpOffset             int // first visible keyboard-help entry
@@ -429,6 +432,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.editMenu.open {
 		return m.handleEditMenu(msg)
 	}
+	if m.moveAction != nil {
+		return m.handleMoveMenu(msg)
+	}
 	if m.showNoteMenu {
 		return m.handleNoteMenu(msg)
 	}
@@ -665,6 +671,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if a := m.selectedAgent(); a != nil {
 			if action := actionFor(a); action != nil {
+				if action.Kind == "attach" {
+					m.notice = ""
+					m.moveAction = action
+					return m, nil
+				}
 				m.cancelAutoTitles("")
 				m.persistViewPreferences()
 				m.action = action

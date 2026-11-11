@@ -36,17 +36,25 @@ func main() {
 
 // runTUI launches the dashboard, then performs whatever action the user chose.
 func runTUI() error {
-	p := tea.NewProgram(ui.New(), tea.WithAltScreen())
-	final, err := p.Run()
-	if err != nil {
-		return err
+	m := ui.New()
+	for {
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		final, err := p.Run()
+		if err != nil {
+			return err
+		}
+		var ok bool
+		m, ok = final.(ui.Model)
+		if !ok || m.Chosen() == nil {
+			return nil
+		}
+		act := m.Chosen()
+		if err := performAction(act); err != nil {
+			return err
+		}
+		if !act.Popup {
+			return nil
+		}
+		m = m.Resume()
 	}
-	m, ok := final.(ui.Model)
-	if !ok {
-		return nil
-	}
-	if act := m.Chosen(); act != nil {
-		return performAction(act)
-	}
-	return nil
 }
