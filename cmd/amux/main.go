@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/kyhan/amux/internal/collect"
 	"github.com/kyhan/amux/internal/ui"
 )
 
@@ -19,14 +20,19 @@ var version = "dev"
 func main() {
 	root := &cobra.Command{
 		Use:          "amux",
-		Short:        "Track AI agents across tmux sessions and background daemons",
+		Short:        "Track AI agents across tmux, Herdr, and background daemons",
 		Version:      version,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTUI()
+			selected, err := commandBackend(cmd)
+			if err != nil {
+				return err
+			}
+			return runTUIWithBackend(selected)
 		},
 	}
-	root.AddCommand(popupCmd(), statusCmd(), setupKeybindCmd(), noteWorkerCmd())
+	addBackendFlag(root)
+	root.AddCommand(popupCmd(), statusCmd(), setupKeybindCmd(), noteWorkerCmd(), herdrAttachCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "amux:", err)
@@ -36,7 +42,11 @@ func main() {
 
 // runTUI launches the dashboard, then performs whatever action the user chose.
 func runTUI() error {
-	m := ui.New()
+	return runTUIWithBackend(ui.SelectedBackend())
+}
+
+func runTUIWithBackend(selected collect.Backend) error {
+	m := ui.NewWithBackend(selected)
 	for {
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		final, err := p.Run()

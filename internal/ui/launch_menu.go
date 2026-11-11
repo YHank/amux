@@ -27,6 +27,7 @@ type launchMenuState struct {
 func (m Model) openLaunchMenu() (tea.Model, tea.Cmd) {
 	history, err := loadLaunchHistory(launchHistoryPath(m.preferencesPath))
 	state := launchMenuState{open: true}
+	state.target.backend = m.selectedBackend()
 	if err != nil {
 		state.error = err.Error()
 	}
@@ -34,13 +35,17 @@ func (m Model) openLaunchMenu() (tea.Model, tea.Cmd) {
 	if a := m.selectedAgent(); a != nil {
 		selected = []string{a.CWD, a.Project}
 		if a.Kind == collect.KindInteractive {
-			state.target = launchTarget{pane: a.TmuxTarget, session: a.Session}
+			state.target = launchTarget{backend: m.selectedBackend(), pane: a.TmuxTarget, session: a.Session,
+				workspace: a.WorkspaceID, terminal: a.TerminalID, tab: a.TabID}
+			if a.Backend == collect.BackendHerdr {
+				state.target.pane = a.PaneID
+			}
 			if tmuxNumericID(a.ID, '%') {
 				state.target.pane = a.ID
 			}
 		}
 	}
-	if state.target.pane == "" && state.target.session == "" {
+	if state.target.backend != collect.BackendHerdr && state.target.pane == "" && state.target.session == "" {
 		for i, pane := range []string{m.startupPaneID, os.Getenv("AMUX_START_PANE"), os.Getenv("TMUX_PANE")} {
 			if tmuxNumericID(pane, '%') {
 				state.target = launchTarget{pane: pane, rejectPopup: i == 2}
@@ -87,8 +92,9 @@ func (m Model) handleLaunchMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			s.busy = true
 			s.error = ""
 			target, path, tool := s.target, s.input, launchTools[s.toolIndex]
+			backend, generation := m.selectedBackend(), m.generation
 			return m, func() tea.Msg {
-				return launchedMsg{path: path, tool: tool,
+				return launchedMsg{path: path, tool: tool, backend: backend, generation: generation,
 					err: runLaunch(context.Background(), target, path, tool)}
 			}
 		}

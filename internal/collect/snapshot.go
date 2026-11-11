@@ -1,6 +1,8 @@
 package collect
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,16 +18,35 @@ import (
 // number of directory scans/globs, so a refresh is cheap enough to run on a
 // sub-second timer.
 func Collect(now time.Time) (Snapshot, error) {
+	return CollectBackend(now, BackendTmux)
+}
+
+// CollectBackend selects interactive discovery while retaining shared daemon
+// sources. Herdr failures return a partial snapshot with a nil pane inventory,
+// preventing callers from treating an incomplete refresh as pane deletion.
+func CollectBackend(now time.Time, backend Backend) (Snapshot, error) {
+	if backend != BackendTmux && backend != BackendHerdr {
+		return Snapshot{}, fmt.Errorf("unsupported collection backend %q", backend)
+	}
 	procs, err := snapshotProcs()
 	if err != nil {
 		return Snapshot{}, err
 	}
-	panes, paneErr := listPanes()
 	var livePaneIDs map[string]bool
-	if paneErr == nil {
-		livePaneIDs = paneIDs(panes)
+	var inter []Agent
+	var backendErr error
+	switch backend {
+	case BackendTmux:
+		panes, paneErr := listPanes()
+		if paneErr == nil {
+			livePaneIDs = paneIDs(panes)
+		}
+		inter = interactiveAgents(procs, panes)
+	case BackendHerdr:
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		inter, livePaneIDs, backendErr = herdrAgents(ctx, procs)
 	}
-	inter := interactiveAgents(procs, panes)
 	bg, err := backgroundAgents(liveShorts())
 	if err != nil {
 		return Snapshot{}, err
@@ -44,7 +65,7 @@ func Collect(now time.Time) (Snapshot, error) {
 		Taken:       now,
 		LivePaneIDs: livePaneIDs,
 	}
-	return snap, nil
+	return snap, backendErr
 }
 
 // appendLiveBackgrounds excludes persisted task records whose owning daemon

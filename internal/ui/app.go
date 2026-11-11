@@ -27,11 +27,16 @@ const notesRefreshEvery = 10 * time.Second
 
 // Action is what amux should do after the TUI exits.
 type Action struct {
-	Kind       string // "attach" | "manage"
-	TmuxTarget string // for attach
-	Session    string // for attach when not already inside tmux
-	CWD        string
-	Popup      bool // attach inside a popup instead of switching the parent client
+	Backend     collect.Backend
+	PaneID      string
+	TerminalID  string
+	WorkspaceID string
+	TabID       string
+	Kind        string // "attach" | "manage"
+	TmuxTarget  string // for attach
+	Session     string // for attach when not already inside tmux
+	CWD         string
+	Popup       bool // attach inside a popup instead of switching the parent client
 }
 
 // rowKind tags each rendered line so the cursor can skip headers.
@@ -51,10 +56,17 @@ type row struct {
 
 // Model is the Bubble Tea model for the dashboard.
 type Model struct {
-	snap    collect.Snapshot
-	rows    []row // flattened headers + agents (post-filter)
-	sel     int   // index into selectable agent rows
-	selRows []int // indices into rows that are selectable (agents)
+	backend                           collect.Backend
+	generation                        uint64
+	tmuxFlatOrder, tmuxGroupedOrder   []string
+	herdrFlatOrder, herdrGroupedOrder []string
+	composeAgent                      collect.Agent
+	killAgent                         collect.Agent
+	noteAgent                         collect.Agent
+	snap                              collect.Snapshot
+	rows                              []row // flattened headers + agents (post-filter)
+	sel                               int   // index into selectable agent rows
+	selRows                           []int // indices into rows that are selectable (agents)
 
 	filter                 string
 	filtering              bool
@@ -131,23 +143,32 @@ func New() Model {
 	prefs := loadViewPreferences(path)
 	currentDir, _ := os.Getwd()
 	m := Model{
-		loading:          true,
-		notesStore:       notes.Load(),
-		lastNotesRefresh: time.Now(),
-		preferencesPath:  path,
-		currentDir:       currentDir,
-		startupPaneID:    strings.TrimSpace(os.Getenv("AMUX_START_PANE")),
-		stacked:          prefs.Stacked,
-		hideDetail:       prefs.HideDetail,
-		flatView:         prefs.FlatView,
-		flatOrder:        prefs.FlatOrder,
-		groupedOrder:     prefs.GroupedOrder,
-		persisted:        prefs,
-		acknowledged:     map[string]bool{},
-		dismissed:        map[string]bool{},
+		loading:           true,
+		notesStore:        notes.Load(),
+		lastNotesRefresh:  time.Now(),
+		preferencesPath:   path,
+		currentDir:        currentDir,
+		startupPaneID:     strings.TrimSpace(os.Getenv("AMUX_START_PANE")),
+		stacked:           prefs.Stacked,
+		hideDetail:        prefs.HideDetail,
+		flatView:          prefs.FlatView,
+		flatOrder:         prefs.FlatOrder,
+		groupedOrder:      prefs.GroupedOrder,
+		persisted:         prefs,
+		backend:           validBackend(prefs.Backend),
+		tmuxFlatOrder:     prefs.FlatOrder,
+		tmuxGroupedOrder:  prefs.GroupedOrder,
+		herdrFlatOrder:    prefs.HerdrFlatOrder,
+		herdrGroupedOrder: prefs.HerdrGroupedOrder,
+		acknowledged:      map[string]bool{},
+		dismissed:         map[string]bool{},
 	}
 	if m.startupPaneID == "" {
 		m.startupPaneID = strings.TrimSpace(os.Getenv("TMUX_PANE"))
+	}
+	if m.backend == collect.BackendHerdr {
+		m.flatOrder, m.groupedOrder = m.herdrFlatOrder, m.herdrGroupedOrder
+		m.startupPaneID = ""
 	}
 	m.refreshRememberedRank()
 	return m
@@ -188,12 +209,16 @@ func (m *Model) refreshRememberedRank() {
 // seconds. A hard kill can still lose the last order; the quit and attach
 // paths flush explicitly so the ordinary exits do not.
 func (m *Model) persistViewPreferences() {
+	m.storeBackendOrder()
 	prefs := viewPreferences{
-		Stacked:      m.stacked,
-		HideDetail:   m.hideDetail,
-		FlatView:     m.flatView,
-		FlatOrder:    m.flatOrder,
-		GroupedOrder: m.groupedOrder,
+		Backend:           m.selectedBackend(),
+		HerdrFlatOrder:    m.herdrFlatOrder,
+		HerdrGroupedOrder: m.herdrGroupedOrder,
+		Stacked:           m.stacked,
+		HideDetail:        m.hideDetail,
+		FlatView:          m.flatView,
+		FlatOrder:         m.tmuxFlatOrder,
+		GroupedOrder:      m.tmuxGroupedOrder,
 	}
 	if prefs.equal(m.persisted) {
 		return
@@ -209,25 +234,27 @@ func (m Model) Chosen() *Action { return m.action }
 
 type tickMsg time.Time
 type snapshotMsg struct {
-	snap collect.Snapshot
-	err  error
+	backend    collect.Backend
+	generation uint64
+	snap       collect.Snapshot
+	err        error
 }
 
 // sentMsg reports the outcome of injecting a composed message into a pane.
 type sentMsg struct {
-	target string
-	err    error
+	backend    collect.Backend
+	generation uint64
+	target     string
+	err        error
 }
 
 type killedMsg struct {
-	target string
-	name   string
-	err    error
-}
-
-func refreshCmd() tea.Msg {
-	snap, err := collect.Collect(time.Now())
-	return snapshotMsg{snap: snap, err: err}
+	backend    collect.Backend
+	generation uint64
+	agentID    string
+	target     string
+	name       string
+	err        error
 }
 
 // sendToPane types text into a tmux pane as if the user had typed it, then
@@ -262,7 +289,7 @@ func tick() tea.Cmd {
 
 // Init kicks off the first scan and the refresh timer.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd, tick())
+	return tea.Batch(m.refreshCommand(), tick())
 }
 
 // Update handles messages.
@@ -277,9 +304,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notesStore.Reload()
 			m.lastNotesRefresh = time.Time(msg)
 		}
-		return m, tea.Batch(refreshCmd, tick())
+		return m, tea.Batch(m.refreshCommand(), tick())
 
 	case snapshotMsg:
+		if !m.acceptBackend(msg.backend, msg.generation) {
+			return m, nil
+		}
 		firstSnapshot := m.loading
 		m.loading = false
 		m.lastRefresh = time.Now()
@@ -359,6 +389,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sentMsg:
+		if !m.acceptBackend(msg.backend, msg.generation) {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.notice = "send failed: " + msg.err.Error()
 		} else {
@@ -367,11 +400,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case killedMsg:
+		if !m.acceptBackend(msg.backend, msg.generation) {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.notice = "kill failed: " + msg.err.Error()
 			return m, nil
 		}
-		m.removePane(msg.target)
+		if msg.agentID != "" {
+			m.removeAgent(msg.agentID)
+		} else {
+			m.removePane(msg.target)
+		}
 		m.pruneAutoTitles()
 		m.notice = "killed " + msg.name
 		return m, nil
@@ -454,11 +494,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Kill confirmation: only y/Y confirms; every other key cancels, no
 	// exceptions — a destructive action should never fire on a stray keypress.
 	if m.confirmingKill {
-		target, name := m.killTarget, m.killName
+		target, name, agent := m.killTarget, m.killName, m.killAgent
 		m.confirmingKill = false
 		m.killTarget = ""
 		m.killName = ""
 		if s := msg.String(); s == "y" || s == "Y" {
+			if agent.ID != "" {
+				return m, m.killAgentCommand(agent)
+			}
 			return m, killPane(target, name)
 		}
 		return m, nil
@@ -514,11 +557,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.composing = false
 			text := m.composeInput
 			m.composeInput = ""
-			a := m.selectedAgent()
-			if a == nil || a.TmuxTarget == "" || strings.TrimSpace(text) == "" {
+			a := m.composeAgent
+			m.composeAgent = collect.Agent{}
+			if !interactiveTarget(a) || strings.TrimSpace(text) == "" {
 				return m, nil
 			}
-			return m, sendToPane(a.TmuxTarget, text)
+			return m, m.sendAgentCommand(a, text)
 		case tea.KeyEsc:
 			m.composing = false
 			m.composeInput = ""
@@ -576,6 +620,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case "tab", "shift+tab":
+		return m.switchBackend()
 	case "q", "ctrl+c":
 		m.cancelAutoTitles("")
 		m.persistViewPreferences()
@@ -604,7 +650,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		m.showNoteMenu = true
 		if a := m.selectedAgent(); a != nil {
-			return m, renameAgentWindow(*a, "start")
+			m.noteAgent = *a
+			return m, m.renameAgentCommand(*a, "start", true)
 		}
 	case "esc":
 		if a := m.selectedAgent(); a != nil {
@@ -613,7 +660,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		if a := m.selectedAgent(); a != nil {
 			m.cancelAutoTitles(a.ID)
-			m.editMenu = editMenuState{open: true, agentID: a.ID}
+			m.editMenu = editMenuState{open: true, agentID: a.ID, agent: *a}
 		}
 	case "I":
 		return m.clearSelectedNote()
@@ -629,14 +676,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		return m.openLaunchMenu()
 	case "s":
-		if a := m.selectedAgent(); a != nil && a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
+		if a := m.selectedAgent(); a != nil && interactiveTarget(*a) {
 			m.composing = true
+			m.composeAgent = *a
 			m.composeInput = ""
 		}
 	case "x":
 		if a := m.selectedAgent(); a != nil {
-			if a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
+			if interactiveTarget(*a) {
 				m.confirmingKill = true
+				m.killAgent = *a
 				m.killTarget = a.TmuxTarget
 				m.killName = a.Name
 			} else if a.Kind == collect.KindBackground {
@@ -649,7 +698,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "r":
-		return m, refreshCmd
+		return m, m.refreshCommand()
 	case "v":
 		m.stacked = !m.stacked
 		m.persistViewPreferences()
@@ -670,6 +719,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if a := m.selectedAgent(); a != nil {
 			if action := actionFor(a); action != nil {
+				action.Backend = m.selectedBackend()
 				if action.Kind == "attach" {
 					m.notice = ""
 					m.moveAction = action
@@ -832,7 +882,7 @@ func (m *Model) pruneNotes() {
 	for _, a := range m.snap.Agents {
 		live[a.ID] = true
 	}
-	m.notesStore.Prune(live)
+	m.pruneBackendNotes(live)
 }
 
 func (m *Model) pruneAcknowledged() {
@@ -946,11 +996,12 @@ func (m Model) selectedAgent() *collect.Agent {
 }
 
 func actionFor(a *collect.Agent) *Action {
-	if a.Kind == collect.KindInteractive && a.TmuxTarget != "" {
-		return &Action{Kind: "attach", TmuxTarget: a.TmuxTarget, Session: a.Session, CWD: a.CWD}
+	if interactiveTarget(*a) {
+		return &Action{Kind: "attach", Backend: validBackend(a.Backend), PaneID: a.PaneID, TerminalID: a.TerminalID,
+			WorkspaceID: a.WorkspaceID, TabID: a.TabID, TmuxTarget: a.TmuxTarget, Session: a.Session, CWD: a.CWD}
 	}
 	if a.Kind == collect.KindBackground && a.Tool == "claude" && a.Live {
-		return &Action{Kind: "manage", CWD: a.CWD}
+		return &Action{Kind: "manage", Backend: validBackend(a.Backend), Session: a.Session, CWD: a.CWD}
 	}
 	return nil
 }

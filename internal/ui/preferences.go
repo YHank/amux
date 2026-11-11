@@ -5,12 +5,17 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/kyhan/amux/internal/collect"
 )
 
 type viewPreferences struct {
-	Stacked    bool `json:"stacked"`
-	HideDetail bool `json:"hide_detail"`
-	FlatView   bool `json:"flat_view"`
+	Backend           collect.Backend `json:"backend,omitempty"`
+	HerdrFlatOrder    []string        `json:"herdr_flat_order,omitempty"`
+	HerdrGroupedOrder []string        `json:"herdr_grouped_order,omitempty"`
+	Stacked           bool            `json:"stacked"`
+	HideDetail        bool            `json:"hide_detail"`
+	FlatView          bool            `json:"flat_view"`
 	// Agent IDs in the order each view last displayed them. Restoring these
 	// lets a fresh dashboard open in the layout the user left rather than the
 	// one it settles into once a second snapshot arrives. Both views are kept
@@ -25,6 +30,9 @@ type viewPreferences struct {
 // slices and is therefore not comparable with ==.
 func (p viewPreferences) equal(other viewPreferences) bool {
 	return p.Stacked == other.Stacked &&
+		validBackend(p.Backend) == validBackend(other.Backend) &&
+		slices.Equal(p.HerdrFlatOrder, other.HerdrFlatOrder) &&
+		slices.Equal(p.HerdrGroupedOrder, other.HerdrGroupedOrder) &&
 		p.HideDetail == other.HideDetail &&
 		p.FlatView == other.FlatView &&
 		slices.Equal(p.FlatOrder, other.FlatOrder) &&

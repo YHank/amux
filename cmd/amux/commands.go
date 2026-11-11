@@ -21,8 +21,15 @@ func popupCmd() *cobra.Command {
 		Use:   "popup",
 		Short: "Open amux as a tmux popup overlay",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			selected, err := commandBackend(cmd)
+			if err != nil {
+				return err
+			}
+			if selected == collect.BackendHerdr && os.Getenv("HERDR_ENV") == "1" {
+				return openHerdrDashboard(width, height)
+			}
 			if os.Getenv("TMUX") == "" {
-				return fmt.Errorf("popup requires running inside tmux")
+				return fmt.Errorf("popup requires running inside tmux or Herdr")
 			}
 			self, err := os.Executable()
 			if err != nil {
@@ -30,7 +37,7 @@ func popupCmd() *cobra.Command {
 			}
 			// Capture the client that is opening the popup so the eventual
 			// switch-client targets it and not the popup's throwaway client.
-			inner := shellQuote(self)
+			inner := shellQuote(self) + " --backend " + shellQuote(string(selected))
 			if client := currentClient(); client != "" {
 				inner = "AMUX_CLIENT=" + shellQuote(client) + " " + inner
 			}
@@ -39,6 +46,7 @@ func popupCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&width, "width", "w", "85%", "popup width")
 	cmd.Flags().StringVarP(&height, "height", "H", "85%", "popup height")
+	addBackendFlag(cmd)
 	return cmd
 }
 
@@ -49,7 +57,11 @@ func statusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Print a one-line AI agent summary for the tmux status bar",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			snap, err := collect.Collect(time.Now())
+			selected, err := commandBackend(cmd)
+			if err != nil {
+				return err
+			}
+			snap, err := collect.CollectBackend(time.Now(), selected)
 			if err != nil {
 				return nil // never break a status bar
 			}
@@ -58,6 +70,7 @@ func statusCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&plain, "plain", false, "no tmux color codes")
+	addBackendFlag(cmd)
 	return cmd
 }
 

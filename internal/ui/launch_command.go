@@ -10,20 +10,27 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/kyhan/amux/internal/collect"
 )
 
 var launchTools = [...]string{"claude", "codex", "omo", "omp", "opencode"}
 
 type launchTarget struct {
+	backend     collect.Backend
+	workspace   string
+	terminal    string
+	tab         string
 	pane        string
 	session     string
 	rejectPopup bool // TMUX_PANE alone may identify amux's temporary session.
 }
 
 type launchedMsg struct {
-	path string
-	tool string
-	err  error
+	backend    collect.Backend
+	generation uint64
+	path       string
+	tool       string
+	err        error
 }
 
 func tmuxNumericID(value string, prefix byte) bool {
@@ -47,6 +54,9 @@ func runLaunch(ctx context.Context, target launchTarget, path, tool string) erro
 	dir, err := launchDirectory(path, "")
 	if err != nil {
 		return err
+	}
+	if target.backend == collect.BackendHerdr {
+		return runHerdrLaunch(ctx, target, dir, tool)
 	}
 	resolve := target.pane
 	if resolve == "" && target.session != "" {
@@ -83,6 +93,9 @@ func runLaunch(ctx context.Context, target launchTarget, path, tool string) erro
 }
 
 func (m Model) handleLaunched(msg launchedMsg) (tea.Model, tea.Cmd) {
+	if !m.acceptBackend(msg.backend, msg.generation) {
+		return m, nil
+	}
 	m.launchMenu.busy = false
 	if msg.err != nil {
 		m.launchMenu.error = msg.err.Error()
@@ -91,5 +104,5 @@ func (m Model) handleLaunched(msg launchedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.launchMenu.open = false
 	m.notice = fmt.Sprintf("Launched %s in %s", msg.tool, msg.path)
-	return m, refreshCmd
+	return m, m.refreshCommand()
 }

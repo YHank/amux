@@ -44,8 +44,13 @@ func interactiveAgents(procs *procTable, panes []pane) []Agent {
 }
 
 func collectInteractiveAgent(procs *procTable, pn pane, ap proc, home string, hasHome bool) Agent {
+	return collectInteractivePreview(procs, pn, ap, home, hasHome, capturePane(pn.target, previewLines))
+}
+
+// collectInteractivePreview shares recognition-independent enrichment between
+// terminal backends; preview retains the terminal's original ANSI formatting.
+func collectInteractivePreview(procs *procTable, pn pane, ap proc, home string, hasHome bool, preview []string) Agent {
 	tool := detectTool(ap)
-	preview := capturePane(pn.target, previewLines)
 	life := interactiveLife(pn.title)
 	if life == LifeIdle && contentShowsSpinner(tool, preview) {
 		life = LifeWorking
@@ -67,6 +72,8 @@ func collectInteractiveAgent(procs *procTable, pn pane, ap proc, home string, ha
 	}
 	return Agent{
 		ID:                 pn.paneID,
+		Backend:            BackendTmux,
+		PaneID:             pn.paneID,
 		Window:             pn.window,
 		Kind:               KindInteractive,
 		Tool:               tool,

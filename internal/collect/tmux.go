@@ -10,6 +10,7 @@ import (
 
 // pane is one tmux pane as reported by `tmux list-panes`.
 type pane struct {
+	backend Backend
 	session string
 	window  string
 	target  string // session:win.pane

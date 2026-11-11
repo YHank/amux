@@ -61,12 +61,17 @@ func (m Model) View() string {
 		return m.renderNoteMenu()
 	}
 	if m.loading && len(m.snap.Agents) == 0 {
-		return "scanning for AI agents…"
+		return m.renderBackendTabs() + "\n" + truncateWidth("scanning for AI agents…", m.width)
 	}
 
-	header := m.renderHeader()
+	header := m.renderBackendTabs() + "\n" + m.renderHeader()
 	footer := m.renderFooter()
-	bodyH := m.height - 2
+	bodyH := m.height - 3
+	if m.err != nil {
+		header += "\n" + lipgloss.NewStyle().Foreground(cRed).Render(
+			truncateWidth("Scan failed: "+strings.ReplaceAll(m.err.Error(), "\n", "; "), m.width))
+		bodyH--
+	}
 	if m.hideDetail {
 		return header + "\n" + fitPane(m.renderList(m.width, bodyH), m.width, bodyH) + "\n" + footer
 	}
@@ -171,6 +176,9 @@ func (m Model) renderHelpPopup() string {
 }
 
 func (m Model) renderStackedBody(header, footer string, bodyH int) string {
+	if bodyH < 3 {
+		return header + "\n" + fitPane(m.renderList(m.width, bodyH), m.width, bodyH) + "\n" + footer
+	}
 	listH := (bodyH - 1) * 35 / 100
 	if listH < 1 {
 		listH = 1
@@ -187,7 +195,10 @@ func (m Model) renderStackedBody(header, footer string, bodyH int) string {
 }
 
 func fitPane(content string, width, height int) string {
-	return lipgloss.NewStyle().Width(width).Height(height).Render(clipLines(content, height))
+	// Width may wrap a logical line into several terminal rows. Clip the
+	// rendered rows, otherwise narrow panes grow past the footer.
+	rendered := lipgloss.NewStyle().Width(width).Render(content)
+	return lipgloss.NewStyle().Height(height).Render(clipLines(rendered, height))
 }
 
 func clipLines(content string, maxLines int) string {
@@ -254,7 +265,11 @@ func (m Model) renderHeader() string {
 	if gap < 1 {
 		gap = 1
 	}
-	return left + strings.Repeat(" ", gap) + right
+	header := left + strings.Repeat(" ", gap) + right
+	if lipgloss.Width(header) <= m.width {
+		return header
+	}
+	return truncateWidth(header, m.width)
 }
 
 func (m Model) renderFooter() string {
@@ -499,13 +514,24 @@ func (m Model) renderDetail(w, h int) string {
 	kindLabel := "background (headless)"
 	if a.Kind == collect.KindInteractive {
 		kindLabel = "interactive (tmux pane)"
+		if a.Backend == collect.BackendHerdr {
+			kindLabel = "interactive (Herdr pane)"
+		}
 	}
 	kv("kind", kindLabel)
 	kv("tool", a.Tool)
 	kv("model", a.Model)
 	kv("project", a.Project)
 	if a.Kind == collect.KindInteractive {
-		kv("pane", a.TmuxTarget)
+		if a.Backend == collect.BackendHerdr {
+			kv("session", a.Session)
+			kv("pane", a.PaneID)
+			kv("terminal", a.TerminalID)
+			kv("workspace", a.WorkspaceID)
+			kv("tab", a.TabID)
+		} else {
+			kv("pane", a.TmuxTarget)
+		}
 		if a.CPU >= 0.1 {
 			kv("cpu", fmt.Sprintf("%.1f%%", a.CPU))
 		}

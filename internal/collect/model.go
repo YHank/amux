@@ -15,6 +15,14 @@ package collect
 
 import "time"
 
+// Backend identifies the terminal inventory used for interactive agents.
+type Backend string
+
+const (
+	BackendTmux  Backend = "tmux"
+	BackendHerdr Backend = "herdr"
+)
+
 // Kind distinguishes where an agent lives.
 type Kind string
 
@@ -57,9 +65,14 @@ type Subagent struct {
 
 // Agent is one AI agent, unified across both sources.
 type Agent struct {
-	ID   string // stable id: sessionId (background) or tmux pane id (interactive)
-	Kind Kind
-	Tool string // claude | omp | omo | opencode | codex | aider | gemini
+	ID          string // stable id: sessionId (background) or tmux pane id (interactive)
+	Kind        Kind
+	Tool        string // claude | omp | omo | opencode | codex | aider | gemini
+	Backend     Backend
+	PaneID      string // backend-native pane identifier
+	TerminalID  string
+	WorkspaceID string
+	TabID       string
 
 	Name  string    // job name, or "session:win.pane" for interactive
 	Model string    // e.g. sonnet, opus[1m] (background only)
@@ -87,7 +100,7 @@ type Agent struct {
 
 	// Interactive-only fields.
 	TmuxTarget         string   // "session:win.pane" — attach target
-	Session            string   // tmux session name
+	Session            string   // backend session name
 	Window             string   // tmux window name
 	PaneTitle          string   // raw tmux pane title; empty when the terminal did not set one
 	PID                int      // foreground agent pid
@@ -156,7 +169,7 @@ type Snapshot struct {
 	Projects []Project
 	Agents   []Agent // flat list, all agents
 	Taken    time.Time
-	// LivePaneIDs includes every tmux pane, even when its agent is not
+	// LivePaneIDs includes every backend pane, even when its agent is not
 	// recognized. Nil means the pane inventory could not be read safely.
 	LivePaneIDs map[string]bool
 }

@@ -38,8 +38,12 @@ func claudeSubagents(root string, parent proc, pn pane) ([]Subagent, bool) {
 	var session claudeSession
 	if !readClaudeRecord(filepath.Join(root, "sessions", strconv.Itoa(parent.pid)+".json"), &session) ||
 		session.PID != parent.pid || parent.pid <= 0 ||
-		!claudeRecordID.MatchString(session.SessionID) || !filepath.IsAbs(session.CWD) ||
-		!strings.HasSuffix(session.Tmux, "."+pn.paneID) || pn.paneID == "" {
+		!claudeRecordID.MatchString(session.SessionID) || !filepath.IsAbs(session.CWD) || pn.paneID == "" {
+		return nil, false
+	}
+	// Herdr ownership comes from process-info and the exact PID/start time
+	// below; Claude's tmux metadata is absent outside tmux.
+	if pn.backend != BackendHerdr && !strings.HasSuffix(session.Tmux, "."+pn.paneID) {
 		return nil, false
 	}
 	// ps etime is rounded to seconds. Allow that precision, but reject a stale

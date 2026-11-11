@@ -1,4 +1,4 @@
-# amux — AI agent tracker for tmux
+# amux — AI agent tracker for tmux and Herdr
 
 **See every AI coding agent you have running — at a glance, in one place.**
 
@@ -144,25 +144,45 @@ go build -o amux ./cmd/amux
 ## Usage
 
 ```bash
-amux                    # open the dashboard
-amux popup              # open as a floating tmux popup (inside tmux)
-amux status             # compact summary for the tmux status bar
+amux                    # open the dashboard with the last selected backend
+amux --backend herdr    # select Herdr explicitly (requires herdr 0.9.5+)
+amux --backend tmux     # select tmux explicitly
+amux popup              # floating popup inside tmux or Herdr
+amux status             # compact summary for the selected backend
+amux status --backend tmux --plain
 amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 ```
+
+The top tabs select **tmux** or **Herdr**. Press `Tab` or `Shift+Tab` outside
+an input popup to switch. The selection is saved locally in
+`amux/preferences.json` under your platform's user configuration directory
+(`~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config`
+on Linux), and restored on the next launch. Notes and remembered ordering
+remain associated with their backend. Background agents appear in both views.
+
+Herdr discovery covers running local named sessions. Install Herdr separately
+and keep `herdr` on `PATH`; an unavailable backend is reported in its tab.
+Attach uses Herdr's direct terminal connection: `Ctrl+B`, then `q` detaches
+without stopping the agent. Native Herdr popups use a locally generated
+`amux.dashboard` plugin, stored beside amux preferences and linked when first
+opened. Fullscreen from a Herdr popup opens a native overlay; there, press
+`Ctrl+B` twice, then `q`, to pass the detach sequence through the outer Herdr
+client. tmux popup and keybinding setup remain available inside tmux.
 
 ### Keybindings
 
 | Key | Action |
 |---|---|
+| `Tab` / `Shift+Tab` | Switch tmux / Herdr tabs and save the selection |
 | `j` / `k` | Move down / up |
 | `J` / `K` | Move to the first visible agent in the next / previous project |
 | `g` / `G` | Jump to first / last |
 | `Enter` | Attach interactive panes or open Claude agents for a live headless session |
 | `s` | Compose a message and send it into an interactive agent's pane |
-| `c` | Choose a project directory or enter a path, then launch claude, codex, omo, omp, or opencode in a new tmux window |
+| `c` | Choose a project directory or enter a path, then launch claude, codex, omo, omp, or opencode in a new tmux window or Herdr tab |
 | `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
 | `/` | Filter by tool, name, project, model, path, status detail, or saved note |
-| `i` | Open the edit popup: `t` edits the tmux window title, `i` edits the note; `Ctrl+U` clears the input |
+| `i` | Open the edit popup: `t` edits the window/pane title, `i` edits the note; `Ctrl+U` clears the input |
 | `I` | Delete the selected agent's note and set its tmux window title to `stay` |
 | `o` | Set the tmux window title to `start` and open the Codex note popup: `o` generate a note, `m` choose a model |
 | `a` | Acknowledge and fold the selected error for this dashboard session |
@@ -189,6 +209,11 @@ set -g status-right '#(amux status)'
 ```
 
 ## How it works
+
+The Herdr tab reads session and pane metadata through the installed CLI,
+captures ANSI output for the same preview and lifecycle detection, and directs
+actions to the captured session and pane IDs. Herdr agent identities include
+their session, so identically numbered panes in different sessions stay separate.
 
 Each 2-second refresh does exactly one `ps`, one `tmux list-panes`, one
 `tmux capture-pane` per detected AI-tool pane, and a handful of bounded

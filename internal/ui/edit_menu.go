@@ -14,6 +14,7 @@ import (
 )
 
 type editMenuState struct {
+	agent      collect.Agent
 	open       bool
 	agentID    string
 	title      bool
@@ -27,10 +28,12 @@ type editMenuState struct {
 }
 
 type renamedWindowMsg struct {
-	target    string
-	title     string
-	err       error
-	automatic bool
+	backend    collect.Backend
+	generation uint64
+	target     string
+	title      string
+	err        error
+	automatic  bool
 }
 
 func (m Model) clearSelectedNote() (tea.Model, tea.Cmd) {
@@ -38,18 +41,15 @@ func (m Model) clearSelectedNote() (tea.Model, tea.Cmd) {
 	if a == nil {
 		return m, nil
 	}
-	cmd := renameAgentWindow(*a, "stay")
+	cmd := m.renameAgentCommand(*a, "stay", true)
 	m.cancelAutoTitles(a.ID)
 	m.notesStore.Set(a.ID, "")
 	m.rebuildRows()
 	return m, cmd
 }
 
-func (m Model) beginNoteEdit() (tea.Model, tea.Cmd) {
-	a := m.selectedAgent()
-	if a == nil {
-		return m, nil
-	}
+func (m Model) beginNoteEdit(agent collect.Agent) (tea.Model, tea.Cmd) {
+	a := &agent
 	m.cancelAutoTitles(a.ID)
 	m.noteError = ""
 	m.noteInput = m.notesStore.Get(a.ID)
@@ -77,7 +77,10 @@ func (m Model) handleEditMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editMenu = editMenuState{}
 		return m, nil
 	}
-	a := m.selectedAgent()
+	a := &m.editMenu.agent
+	if a.ID == "" {
+		a = m.selectedAgent()
+	}
 	if a == nil || a.ID != m.editMenu.agentID {
 		m.editMenu = editMenuState{}
 		return m, nil
@@ -85,17 +88,21 @@ func (m Model) handleEditMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.editMenu.title {
 		switch msg.String() {
 		case "i":
+			agent := *a
 			m.editMenu = editMenuState{}
-			return m.beginNoteEdit()
+			return m.beginNoteEdit(agent)
 		case "t":
-			if a.Kind != collect.KindInteractive || a.TmuxTarget == "" {
-				m.editMenu.err = "Window titles require a tmux pane"
+			if !interactiveTarget(*a) {
+				m.editMenu.err = "Titles require an interactive pane"
 				return m, nil
 			}
 			m.editMenu.title = true
 			m.editMenu.input = a.Window
 			m.editMenu.target = a.TmuxTarget
 			if strings.HasPrefix(a.ID, "%") {
+				m.editMenu.target = a.ID
+			}
+			if a.Backend == collect.BackendHerdr {
 				m.editMenu.target = a.ID
 			}
 			presets, err := loadTitlePresets(defaultTitlePresetsPath())
@@ -109,17 +116,6 @@ func (m Model) handleEditMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.handleTitlePicker(msg)
-}
-
-func renameAgentWindow(a collect.Agent, title string) tea.Cmd {
-	if a.Kind != collect.KindInteractive || a.TmuxTarget == "" {
-		return nil
-	}
-	target := a.TmuxTarget
-	if strings.HasPrefix(a.ID, "%") {
-		target = a.ID
-	}
-	return renameWindow(target, title, true)
 }
 
 func renameWindow(target, title string, automatic bool) tea.Cmd {
@@ -137,6 +133,9 @@ func renameWindow(target, title string, automatic bool) tea.Cmd {
 }
 
 func (m Model) handleRenamedWindow(msg renamedWindowMsg) (tea.Model, tea.Cmd) {
+	if !m.acceptBackend(msg.backend, msg.generation) {
+		return m, nil
+	}
 	editing := !msg.automatic && m.editMenu.saving && m.editMenu.target == msg.target
 	if msg.err != nil {
 		if !editing {
@@ -151,7 +150,7 @@ func (m Model) handleRenamedWindow(msg renamedWindowMsg) (tea.Model, tea.Cmd) {
 		m.editMenu = editMenuState{}
 	}
 	m.notice = "window title: " + msg.title
-	return m, refreshCmd
+	return m, m.refreshCommand()
 }
 
 func (m Model) renderEditPopup() string {

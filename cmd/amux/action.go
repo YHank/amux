@@ -6,11 +6,15 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/kyhan/amux/internal/collect"
 	"github.com/kyhan/amux/internal/ui"
 )
 
 // performAction runs the post-TUI action.
 func performAction(a *ui.Action) error {
+	if a.Backend == collect.BackendHerdr {
+		return performHerdrAction(a)
+	}
 	switch a.Kind {
 	case "attach":
 		if a.Popup {

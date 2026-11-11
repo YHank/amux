@@ -20,6 +20,9 @@ func (m Model) handleTitlePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.editMenu.saving = true
+		if m.editMenu.agent.ID != "" {
+			return m, m.renameAgentCommand(m.editMenu.agent, title, false)
+		}
 		return m, renameWindow(m.editMenu.target, title, false)
 	case tea.KeyUp, tea.KeyDown:
 		if len(m.editMenu.presets) == 0 {

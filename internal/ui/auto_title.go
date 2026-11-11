@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kyhan/amux/internal/collect"
@@ -28,6 +30,16 @@ func launchNote(request notegen.Request) (func() error, error) {
 }
 
 func (m Model) fetchAutoTitle(a collect.Agent) (tea.Model, tea.Cmd) {
+	if a.Backend == collect.BackendHerdr {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		captured, err := captureNoteAgent(ctx, a)
+		cancel()
+		if err != nil {
+			m.notice = "Codex failed: " + err.Error()
+			return m, nil
+		}
+		a = captured
+	}
 	if m.autoTitleRequests == nil {
 		m.autoTitleRequests = make(map[uint64]autoTitleRequest)
 		m.autoTitleLatest = make(map[string]uint64)

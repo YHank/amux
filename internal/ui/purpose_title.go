@@ -53,5 +53,9 @@ func (m Model) applyPurposeTitle(msg purposeTitleMsg) Model {
 }
 
 func inferPurposeTitle(ctx context.Context, a collect.Agent) (string, error) {
+	a, err := captureNoteAgent(ctx, a)
+	if err != nil {
+		return "", err
+	}
 	return notegen.Title(ctx, a, notegen.SelectedModel())
 }

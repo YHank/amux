@@ -39,6 +39,7 @@ func (m *Model) closeNoteMenu() {
 		m.modelCancel = nil
 	}
 	m.showNoteMenu = false
+	m.noteAgent = collect.Agent{}
 	m.choosingNoteModel = false
 	m.modelLoading = false
 }
@@ -57,10 +58,10 @@ func (m Model) handleNoteMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.choosingNoteModel {
 		switch msg.String() {
 		case "o":
-			a := m.selectedAgent()
+			a := m.noteAgent
 			m.closeNoteMenu()
-			if a != nil && a.Kind == collect.KindInteractive {
-				return m.fetchAutoTitle(*a)
+			if a.ID != "" && a.Kind == collect.KindInteractive {
+				return m.fetchAutoTitle(a)
 			}
 		case "m":
 			return m.loadNoteModels()
