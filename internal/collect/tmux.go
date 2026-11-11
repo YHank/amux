@@ -376,10 +376,11 @@ func interactiveLife(title string) Lifecycle {
 const contentSpinnerScanLines = 10
 
 // omoWorkingStatus matches OmO's active editor border. Live working panes
-// showed "── • Working (6s • esc to interrupt) ──" without a spinner; idle
-// and completed panes showed a plain border instead. Goal text in the footer
+// showed "── • Working (6s • esc to interrupt) ──" without a spinner, and
+// "── • Running task: <title> (1m 13s • esc to interrupt) ──" while a tool or
+// subagent runs; idle and completed panes showed a plain border instead. Goal text in the footer
 // and the static "OmO - ..." title are not working-state signals.
-var omoWorkingStatus = regexp.MustCompile(`^─{2,}\s*•\s+Working\s+\([^)]*\besc to interrupt\)\s*─*$`)
+var omoWorkingStatus = regexp.MustCompile(`^─{2,}\s*•\s+(?:Working|Running\s[^(]*?)\s*\([^)]*\besc to interrupt\)\s*─*$`)
 
 // OpenCode 2.2.5 shows this footer while descendant sessions are running,
 // including when the parent prompt has no "esc interrupt" marker.

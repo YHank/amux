@@ -460,6 +460,7 @@ func TestOMONativeWorkingBorder(t *testing.T) {
 		want  bool
 	}{
 		{"working without a spinner", working, true},
+		{"running task border", []string{"── • Running task: Gate-review withdraw · agent:omo-nat... (1m 13s • esc to interrupt) ──", "❯"}, true},
 		{"ANSI-wrapped border", []string{"\x1b[36m── • Working (3s • esc to interrupt) ──\x1b[0m", "❯"}, true},
 		{"idle after completion", idle, false},
 		{"goal text alone", []string{"❯", "(😺 OmO Native by Q Kim) 🤖 Pursuing goal (6m)"}, false},
