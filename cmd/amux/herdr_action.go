@@ -15,20 +15,17 @@ import (
 func performHerdrAction(a *ui.Action) error {
 	switch a.Kind {
 	case "attach":
-		if a.TerminalID == "" {
-			return errors.New("no Herdr terminal selected")
-		}
-		if !a.Popup && os.Getenv("HERDR_ENV") == "1" && os.Getenv("AMUX_HERDR_POPUP") != "" {
-			if err := openHerdrSurface("", "terminal", "overlay", "", "", map[string]string{
-				"AMUX_HERDR_SESSION":  a.Session,
-				"AMUX_HERDR_TERMINAL": a.TerminalID,
-			}); err != nil {
-				return err
+		if !a.Popup && os.Getenv("HERDR_ENV") == "1" {
+			if a.PaneID == "" {
+				return errors.New("no Herdr pane selected")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			_, err := herdr.Call(ctx, "", "popup.close", nil)
+			_, err := herdr.Call(ctx, a.Session, "pane.focus", map[string]string{"pane_id": a.PaneID})
 			return err
+		}
+		if a.TerminalID == "" {
+			return errors.New("no Herdr terminal selected")
 		}
 		if a.Popup && os.Getenv("HERDR_ENV") == "1" && os.Getenv("AMUX_HERDR_POPUP") == "" {
 			return openHerdrSurface("", "terminal", "popup", "85%", "85%", map[string]string{
@@ -37,10 +34,10 @@ func performHerdrAction(a *ui.Action) error {
 			})
 		}
 		if a.Popup && os.Getenv("TMUX") != "" && os.Getenv("HERDR_ENV") != "1" {
-			args := append([]string{"herdr"}, herdr.Args(a.Session, "terminal", "attach", a.TerminalID)...)
+			args := append([]string{"herdr"}, herdr.Args(a.Session, "terminal", "attach", a.TerminalID, "--takeover")...)
 			return runInherit("tmux", "display-popup", "-w", "85%", "-h", "85%", "-E", shellJoin(args))
 		}
-		return runInherit("herdr", herdr.Args(a.Session, "terminal", "attach", a.TerminalID)...)
+		return runHerdrAttach(a.Session, a.TerminalID)
 	case "manage":
 		_, args, err := claudeActionArgs(a)
 		if err != nil {
@@ -100,7 +97,7 @@ func herdrAttachCmd() *cobra.Command {
 			if terminal == "" || session == "" {
 				return errors.New("Herdr popup terminal context is missing")
 			}
-			return runInherit("herdr", herdr.Args(session, "terminal", "attach", terminal)...)
+			return runHerdrAttach(session, terminal)
 		},
 	}
 }
