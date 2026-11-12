@@ -162,12 +162,14 @@ remain associated with their backend. Background agents appear in both views.
 
 Herdr discovery covers running local named sessions. Install Herdr separately
 and keep `herdr` on `PATH`; an unavailable backend is reported in its tab.
-Attach uses Herdr's direct terminal connection: `Ctrl+B`, then `q` detaches
-without stopping the agent. Native Herdr popups use a locally generated
+Inside Herdr, `Enter`, then `f` focuses the selected agent's actual workspace,
+tab, and pane. For a popup, use `Enter`, then `p`; `Ctrl+Space`, then `d`
+returns to the dashboard without stopping the agent. Press `q` there to quit.
+Herdr's native `Ctrl+B`, then `q` detach sequence also works; press
+`Ctrl+Space` twice to send a literal `Ctrl+Space` to the agent.
+Native Herdr popups use a locally generated
 `amux.dashboard` plugin, stored beside amux preferences and linked when first
-opened. Fullscreen from a Herdr popup opens a native overlay; there, press
-`Ctrl+B` twice, then `q`, to pass the detach sequence through the outer Herdr
-client. tmux popup and keybinding setup remain available inside tmux.
+opened. tmux popup and keybinding setup remain available inside tmux.
 
 ### Keybindings
 
