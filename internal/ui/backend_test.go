@@ -200,6 +200,41 @@ func TestBackendNotesKeepAllNotesWhenInventoryFails(t *testing.T) {
 	}
 }
 
+func TestHerdrGeneratedNotesSurviveLegacyPrune(t *testing.T) {
+	for _, saved := range []collect.Backend{collect.BackendTmux, collect.BackendHerdr} {
+		t.Run(string(saved), func(t *testing.T) {
+			fixture := backendTestModel(t)
+			saveViewPreferences(fixture.preferencesPath, viewPreferences{Backend: saved})
+			m := NewWithBackend(collect.BackendHerdr)
+			id := "herdr:default:w9:p2"
+			token, err := m.notesStore.Begin(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			worker := notes.Open(m.notesStore.Path())
+			if applied, err := worker.Complete(id, token, "generated note", nil); err != nil || !applied {
+				t.Fatalf("completion applied=%v err=%v", applied, err)
+			}
+
+			// A pre-Herdr dashboard only knows tmux's live IDs.
+			legacy := notes.Load()
+			legacy.Set("%54", "tmux note")
+			legacy.Prune(map[string]bool{"%54": true})
+			m.notesStore.Reload()
+
+			if got := m.notesStore.Get(id); got != "generated note" {
+				t.Fatalf("legacy prune erased live Herdr generated note: got %q", got)
+			}
+			if got := NewWithBackend(collect.BackendHerdr).notesStore.Get(id); got != "generated note" {
+				t.Fatalf("reopened Herdr note=%q", got)
+			}
+			if got := notes.Load().Get("%54"); got != "tmux note" {
+				t.Fatalf("legacy tmux note=%q", got)
+			}
+		})
+	}
+}
+
 func TestBackendPreferenceSavePreservesInactiveOrderAfterEmptySnapshot(t *testing.T) {
 	m := backendTestModel(t)
 	m.herdrFlatOrder = []string{"herdr:s:p1"}

@@ -251,6 +251,11 @@ keeps its note even if a refresh misses its agent process or a dashboard does
 not recognize its tool; a failed pane scan never clears notes. amux never
 touches any other tool's files.
 
+The Herdr view uses `herdr-notes.json` in the same directory so older tmux
+dashboards cannot prune its notes. Existing Herdr notes in `notes.json` are
+copied on first use without changing the original file. Notes already deleted
+by an older dashboard must be generated again.
+
 The note popup queries the installed, logged-in `codex app-server` for available
 models. Select with `j`/`k` and `Enter`; the choice stays in `note-model.json`
 beside `notes.json` until changed, independently of layout preferences.
@@ -261,7 +266,8 @@ worker. You can navigate, quit with `q`, or close the dashboard; the result is
 saved for the next launch. Repeating the action supersedes older requests for
 that agent, even across dashboards. Entering `i`, deleting with `I`, or pressing
 `Esc` on the selected agent invalidates pending results; cancelling the editor
-does not revive them. Request tokens live in `notes.json.requests` and share
+does not revive them. Request tokens live beside the active note file with a
+`.requests` suffix and share
 the note store's lock, so stale workers cannot overwrite manual edits.
 This feature requires Codex CLI on `PATH` and its existing login.
 

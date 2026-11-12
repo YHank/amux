@@ -170,3 +170,54 @@ func TestAutoTitleFailurePreservesUserText(t *testing.T) {
 		t.Fatal("failure changed manual text or was hidden")
 	}
 }
+
+func TestHerdrAutoTitlePersistsAfterSwitchOrQuitAndLegacyPrune(t *testing.T) {
+	for _, action := range []string{"switch", "quit"} {
+		t.Run(action, func(t *testing.T) {
+			fixture, a, _ := herdrActionFixture(t)
+			m := NewWithBackend(collect.BackendHerdr)
+			m.snap = fixture.snap
+			m.rebuildRows()
+			m.noteLauncher = func(request notegen.Request) (func() error, error) {
+				return func() error {
+					applied, err := notes.Open(request.StorePath).Complete(request.Agent.ID, request.Token, "generated after "+action, nil)
+					if err != nil {
+						return err
+					}
+					if !applied {
+						return errors.New("worker request was invalidated")
+					}
+					return nil
+				}, nil
+			}
+			m, complete := generateNote(m)
+			if complete == nil {
+				t.Fatalf("o then o did not launch generation: %s", m.notice)
+			}
+
+			key := tea.KeyMsg{Type: tea.KeyTab}
+			if action == "quit" {
+				key = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}
+			}
+			next, _ := m.Update(key)
+			m = next.(Model)
+			msg := complete().(autoTitleMsg)
+			if msg.err != nil {
+				t.Fatal(msg.err)
+			}
+			legacy := notes.Load()
+			legacy.Set("%54", "tmux note")
+			legacy.Prune(map[string]bool{"%54": true})
+			if action == "switch" {
+				next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+				m = next.(Model)
+			} else {
+				m = NewWithBackend(collect.BackendHerdr)
+			}
+
+			if got := m.notesStore.Get(a.ID); got != "generated after "+action {
+				t.Fatalf("detached Herdr note lost after %s: %q", action, got)
+			}
+		})
+	}
+}

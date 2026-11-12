@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kyhan/amux/internal/collect"
+	"github.com/kyhan/amux/internal/notes"
 )
 
 func validBackend(backend collect.Backend) collect.Backend {
@@ -37,7 +38,16 @@ func NewWithBackend(backend collect.Backend) Model {
 			}
 		}
 	}
+	m.loadBackendNotes()
 	return m
+}
+
+func (m *Model) loadBackendNotes() {
+	if m.selectedBackend() == collect.BackendHerdr {
+		m.notesStore = notes.LoadHerdr()
+	} else {
+		m.notesStore = notes.Load()
+	}
 }
 
 func (m Model) selectedBackend() collect.Backend { return validBackend(m.backend) }
@@ -68,6 +78,7 @@ func (m *Model) storeBackendOrder() {
 func (m *Model) activateBackend(backend collect.Backend) {
 	m.storeBackendOrder()
 	m.backend = backend
+	m.loadBackendNotes()
 	if backend == collect.BackendHerdr {
 		m.flatOrder, m.groupedOrder = m.herdrFlatOrder, m.herdrGroupedOrder
 	} else {
