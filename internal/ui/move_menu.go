@@ -5,7 +5,25 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/kyhan/amux/internal/collect"
 )
+
+func (m Model) projectTmuxTargets(selected *collect.Agent) []string {
+	if m.selectedBackend() != collect.BackendTmux {
+		return nil
+	}
+	targets := []string{selected.TmuxTarget}
+	if selected.Project == "" {
+		return targets
+	}
+	for _, a := range m.snap.Agents {
+		if a.Project == selected.Project && validBackend(a.Backend) == collect.BackendTmux &&
+			a.Kind == collect.KindInteractive && a.TmuxTarget != "" && a.TmuxTarget != selected.TmuxTarget {
+			targets = append(targets, a.TmuxTarget)
+		}
+	}
+	return targets
+}
 
 func (m Model) handleMoveMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -52,6 +70,9 @@ func (m Model) renderMoveMenu() string {
 		"  f  Fullscreen",
 		"  p  Popup",
 		"j/k select | enter open | esc cancel",
+	}
+	if m.moveAction.Backend == collect.BackendTmux {
+		lines[2] = "  p  Project popup (window tabs)"
 	}
 	selected := 1
 	if m.movePopup {

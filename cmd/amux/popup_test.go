@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kyhan/amux/internal/ui"
 )
 
 func popupTestServer(t *testing.T) func(...string) string {
@@ -39,7 +41,7 @@ func TestPopupKeepsAgentWhenSourceSessionSelectsAmux(t *testing.T) {
 	agentWindow := run("display-message", "-p", "-t", target, "#{window_id}")
 	sourceWindow := run("display-message", "-p", "-t", "source:", "#{window_id}")
 
-	popup, err := createPopupSession(target)
+	popup, err := createPopupSession(&ui.Action{TmuxTarget: target})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +56,47 @@ func TestPopupKeepsAgentWhenSourceSessionSelectsAmux(t *testing.T) {
 	run("kill-session", "-t", "="+popup)
 	if got := run("display-message", "-p", "-t", target, "#{pane_id}"); got != target {
 		t.Fatalf("closing popup lost the original agent pane: %s", got)
+	}
+}
+
+func TestPopupGroupsProjectWindowsAndKeepsSourcePanes(t *testing.T) {
+	run := popupTestServer(t)
+	peer := run("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "source", "-n", "peer", "cat")
+	selected := run("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", peer, "cat")
+	other := run("new-session", "-d", "-P", "-F", "#{pane_id}", "-s", "other", "-n", "project-agent", "cat")
+	peerWindow := run("display-message", "-p", "-t", peer, "#{window_id}")
+	otherWindow := run("display-message", "-p", "-t", other, "#{window_id}")
+	sourceWindow := run("display-message", "-p", "-t", "source:0", "#{window_id}")
+	// The missing peer represents an agent that closed after Enter.
+	action := &ui.Action{TmuxTarget: selected, ProjectTargets: []string{peer, selected, other, "%999999"}}
+	run("set-option", "-g", "base-index", "1")
+	run("set-option", "-g", "status", "off")
+
+	popup, err := createPopupSession(action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := run("list-windows", "-t", "="+popup, "-F", "#{window_id}"); got != peerWindow+"\n"+otherWindow {
+		t.Fatalf("popup windows = %q, want only unique project windows", got)
+	}
+	if got := run("display-message", "-p", "-t", popup+":", "#{pane_id}"); got != selected {
+		t.Fatalf("popup selected pane = %s, want %s", got, selected)
+	}
+	if got := run("show-options", "-v", "-t", popup, "status"); got != "on" {
+		t.Fatalf("project tabs are hidden: status=%s", got)
+	}
+	if got := run("display-message", "-p", "-t", "source:", "#{window_id}"); got != sourceWindow {
+		t.Fatalf("source window changed: %s", got)
+	}
+	run("next-window", "-t", popup+":")
+	if got := run("display-message", "-p", "-t", popup+":", "#{window_id}"); got != otherWindow {
+		t.Fatalf("project tab switch selected %s, want %s", got, otherWindow)
+	}
+	run("kill-session", "-t", "="+popup)
+	for _, pane := range []string{peer, selected, other} {
+		if got := run("display-message", "-p", "-t", pane, "#{pane_id}"); got != pane {
+			t.Fatalf("closing project popup lost %s: %s", pane, got)
+		}
 	}
 }
 

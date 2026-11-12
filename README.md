@@ -177,7 +177,7 @@ client. tmux popup and keybinding setup remain available inside tmux.
 | `j` / `k` | Move down / up |
 | `J` / `K` | Move to the first visible agent in the next / previous project |
 | `g` / `G` | Jump to first / last |
-| `Enter` | Attach interactive panes or open Claude agents for a live headless session |
+| `Enter` | Choose `f` for fullscreen or `p` for a popup; open Claude agents for a live headless session |
 | `s` | Compose a message and send it into an interactive agent's pane |
 | `c` | Choose a project directory or enter a path, then launch claude, codex, omo, omp, or opencode in a new tmux window or Herdr tab |
 | `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
@@ -193,6 +193,12 @@ client. tmux popup and keybinding setup remain available inside tmux.
 | `m` | Show / hide the detail and terminal-preview pane |
 | `?` | Show keyboard shortcuts; press `?` or `Esc` to close |
 | `q` | Quit |
+
+In tmux, `Enter` → `p` groups the selected project's agent windows into one
+popup session and opens the selected agent first. Use your tmux prefix followed
+by `n` / `p` to switch window tabs, or `w` to choose a window. Agents sharing a
+window keep their existing pane layout in one tab. Detach with your prefix
+followed by `d` to return to amux; the original agent sessions remain running.
 
 The `i` → `t` popup keeps the title input above a selectable list. Use `↑` / `↓`
 to choose a title and `Enter` to apply it, or type a custom title. `Tab` replaces

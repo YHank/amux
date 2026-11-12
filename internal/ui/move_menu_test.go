@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -69,6 +70,30 @@ func TestMoveMenuDispatchesChosenTarget(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMoveMenuCapturesProjectTargets(t *testing.T) {
+	a := collect.Agent{ID: "selected", Kind: collect.KindInteractive, Life: collect.LifeWorking,
+		Project: "/p", TmuxTarget: "source:1.0"}
+	peer := a
+	peer.ID, peer.TmuxTarget, peer.Life = "peer", "other:2.0", collect.LifeDone
+	foreign := a
+	foreign.ID, foreign.Project, foreign.TmuxTarget = "foreign", "/other", "other:3.0"
+	background := collect.Agent{ID: "background", Kind: collect.KindBackground, Project: "/p"}
+	herdr := a
+	herdr.ID, herdr.Backend, herdr.TmuxTarget = "herdr", collect.BackendHerdr, "herdr:1.0"
+	m := Model{snap: projSnap(a, peer, foreign, background, herdr)}
+	m.rebuildRows()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	m.snap = projSnap(foreign)
+	m.rebuildRows()
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	action := next.(Model).Chosen()
+	if action == nil || !reflect.DeepEqual(action.ProjectTargets, []string{a.TmuxTarget, peer.TmuxTarget}) {
+		t.Fatalf("popup must keep the captured project's tmux agents: %+v", action)
 	}
 }
 

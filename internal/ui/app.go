@@ -27,16 +27,17 @@ const notesRefreshEvery = 10 * time.Second
 
 // Action is what amux should do after the TUI exits.
 type Action struct {
-	Backend     collect.Backend
-	PaneID      string
-	TerminalID  string
-	WorkspaceID string
-	TabID       string
-	Kind        string // "attach" | "manage"
-	TmuxTarget  string // for attach
-	Session     string // for attach when not already inside tmux
-	CWD         string
-	Popup       bool // attach inside a popup instead of switching the parent client
+	Backend        collect.Backend
+	PaneID         string
+	TerminalID     string
+	WorkspaceID    string
+	TabID          string
+	Kind           string // "attach" | "manage"
+	TmuxTarget     string // for attach
+	Session        string // for attach when not already inside tmux
+	CWD            string
+	Popup          bool     // attach inside a popup instead of switching the parent client
+	ProjectTargets []string // tmux panes in the captured project
 }
 
 // rowKind tags each rendered line so the cursor can skip headers.
@@ -722,6 +723,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				action.Backend = m.selectedBackend()
 				if action.Kind == "attach" {
 					m.notice = ""
+					action.ProjectTargets = m.projectTmuxTargets(a)
 					m.moveAction = action
 					return m, nil
 				}

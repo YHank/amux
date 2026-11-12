@@ -11,9 +11,10 @@ import (
 	"github.com/kyhan/amux/internal/ui"
 )
 
-// createPopupSession links the agent's window into a separate session so
-// navigation in its original session cannot replace the popup with amux.
-func createPopupSession(target string) (string, error) {
+// createPopupSession links the project's windows into a separate session so
+// navigation in the original sessions cannot replace the popup with amux.
+func createPopupSession(a *ui.Action) (string, error) {
+	target := a.TmuxTarget
 	out, err := exec.Command("tmux", "display-message", "-p", "-t", target,
 		"#{window_id}\t#{pane_id}").Output()
 	if err != nil {
@@ -23,13 +24,35 @@ func createPopupSession(target string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("invalid popup target: %q", out)
 	}
+	windows := []string{window}
+	seen := map[string]bool{window: true}
+	for _, target := range a.ProjectTargets {
+		if target == a.TmuxTarget {
+			continue
+		}
+		out, err := exec.Command("tmux", "display-message", "-p", "-t", target, "#{window_id}").Output()
+		if err != nil {
+			// A peer may have closed since the move menu was opened.
+			continue
+		}
+		peer := strings.TrimSpace(string(out))
+		if peer != "" && !seen[peer] {
+			windows = append(windows, peer)
+			seen[peer] = true
+		}
+	}
 	session := "amux-popup-" + strconv.Itoa(os.Getpid())
 	if out, err := exec.Command("tmux", "new-session", "-d", "-s", session).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("create popup session: %w: %s", err, out)
 	}
-	if out, err := exec.Command("tmux", "link-window", "-k", "-s", window, "-t", session+":0",
+	args := []string{"link-window", "-k", "-s", window, "-t", session + ":{start}"}
+	for _, peer := range windows[1:] {
+		args = append(args, ";", "link-window", "-d", "-s", peer, "-t", session+":")
+	}
+	args = append(args, ";", "set-option", "-t", session, "status", "on",
 		";", "select-window", "-t", session+":"+window,
-		";", "select-pane", "-t", pane).CombinedOutput(); err != nil {
+		";", "select-pane", "-t", pane)
+	if out, err := exec.Command("tmux", args...).CombinedOutput(); err != nil {
 		cleanupErr := exec.Command("tmux", "kill-session", "-t", "="+session).Run()
 		return "", errors.Join(fmt.Errorf("link popup target: %w: %s", err, out), cleanupErr)
 	}
@@ -58,13 +81,13 @@ func runningInPopup() (bool, error) {
 }
 
 // attachPopup reuses the popup hosting amux, or opens an agent popup over the
-// invoking client. The temporary session owns only a link, never the agent.
+// invoking client. The temporary session owns only links, never the agents.
 func attachPopup(a *ui.Action) (err error) {
 	if a.TmuxTarget == "" {
 		return fmt.Errorf("no tmux target")
 	}
 	tmuxEnv := os.Getenv("TMUX")
-	session, err := createPopupSession(a.TmuxTarget)
+	session, err := createPopupSession(a)
 	if err != nil {
 		return err
 	}
@@ -81,14 +104,9 @@ func attachPopup(a *ui.Action) (err error) {
 	args := []string{"-u", "TMUX", "-u", "AMUX_CLIENT", "tmux",
 		"-S", socket, "attach-session", "-E", "-t", "=" + session}
 	if tmuxEnv == "" {
-		// A terminal outside tmux has no client on which to draw an overlay.
-		// Attach a temporary host to this terminal, open the agent popup there,
-		// then remove the host so runTUI can restore the original list.
-		host := session + "-host"
-		popup := shellJoin([]string{"tmux", "-S", socket, "display-popup",
-			"-w", "85%", "-h", "85%", "-E", shellJoin(append([]string{"env"}, args...))})
-		closeHost := shellJoin([]string{"tmux", "-S", socket, "kill-session", "-t", "=" + host})
-		return runInherit("tmux", "-S", socket, "new-session", "-s", host, popup+"; "+closeHost)
+		// The current terminal may itself be a popup with TMUX unset.
+		// Attach directly to preserve its size instead of nesting an overlay.
+		return runInherit("env", args...)
 	}
 	reuse, err := runningInPopup()
 	if err != nil {
