@@ -149,7 +149,7 @@ func New() Model {
 		lastNotesRefresh:  time.Now(),
 		preferencesPath:   path,
 		currentDir:        currentDir,
-		startupPaneID:     strings.TrimSpace(os.Getenv("AMUX_START_PANE")),
+		startupPaneID:     startupAgentID(validBackend(prefs.Backend)),
 		stacked:           prefs.Stacked,
 		hideDetail:        prefs.HideDetail,
 		flatView:          prefs.FlatView,
@@ -164,12 +164,8 @@ func New() Model {
 		acknowledged:      map[string]bool{},
 		dismissed:         map[string]bool{},
 	}
-	if m.startupPaneID == "" {
-		m.startupPaneID = strings.TrimSpace(os.Getenv("TMUX_PANE"))
-	}
 	if m.backend == collect.BackendHerdr {
 		m.flatOrder, m.groupedOrder = m.herdrFlatOrder, m.herdrGroupedOrder
-		m.startupPaneID = ""
 	}
 	m.refreshRememberedRank()
 	return m

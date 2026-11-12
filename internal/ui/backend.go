@@ -29,14 +29,7 @@ func NewWithBackend(backend collect.Backend) Model {
 	m := New()
 	if backend = validBackend(backend); backend != m.selectedBackend() {
 		m.activateBackend(backend)
-		if backend == collect.BackendHerdr {
-			m.startupPaneID = ""
-		} else {
-			m.startupPaneID = strings.TrimSpace(os.Getenv("AMUX_START_PANE"))
-			if m.startupPaneID == "" {
-				m.startupPaneID = strings.TrimSpace(os.Getenv("TMUX_PANE"))
-			}
-		}
+		m.startupPaneID = startupAgentID(backend)
 	}
 	m.loadBackendNotes()
 	return m
