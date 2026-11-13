@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kyhan/amux/internal/herdr"
@@ -19,6 +20,11 @@ type herdrPane struct {
 	CWD           string `json:"cwd"`
 	ForegroundCWD string `json:"foreground_cwd"`
 	Title         string `json:"terminal_title"`
+	AgentSession  struct {
+		Agent string `json:"agent"`
+		Kind  string `json:"kind"`
+		Value string `json:"value"`
+	} `json:"agent_session"`
 }
 
 // herdrAgents inventories all running sessions. Any incomplete inventory leaves
@@ -108,6 +114,25 @@ func herdrAgents(ctx context.Context, procs *procTable) ([]Agent, map[string]boo
 				}
 			}
 			a := collectInteractivePreview(procs, pn, ap, home, homeErr == nil, preview)
+			if hp.AgentSession.Agent == a.Tool && hp.AgentSession.Kind == "id" && homeErr == nil {
+				switch a.Tool {
+				case "opencode":
+					dataHome := os.Getenv("XDG_DATA_HOME")
+					if dataHome == "" {
+						dataHome = filepath.Join(home, ".local", "share")
+					}
+					a.Checklist = opencodeChecklist(ctx, filepath.Join(dataHome, "opencode"), hp.AgentSession.Value)
+					if len(a.Checklist) == 0 {
+						a.Intent = opencodeIntent(ctx, filepath.Join(dataHome, "opencode"), hp.AgentSession.Value)
+					}
+				case "codex":
+					root := os.Getenv("CODEX_HOME")
+					if root == "" {
+						root = filepath.Join(home, ".codex")
+					}
+					a.Checklist, a.Intent = codexChecklist(root, hp.AgentSession.Value)
+				}
+			}
 			a.ID, a.Backend = id, BackendHerdr
 			a.Name = session.Name + ":" + hp.PaneID
 			a.TerminalID, a.WorkspaceID, a.TabID = hp.TerminalID, hp.WorkspaceID, hp.TabID

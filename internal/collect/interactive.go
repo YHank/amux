@@ -60,9 +60,15 @@ func collectInteractivePreview(procs *procTable, pn pane, ap proc, home string, 
 		life = LifeInput
 	}
 	var subagents []Subagent
+	var checklist []ChecklistItem
+	var intent string
 	if tool == "claude" && hasHome {
 		var busy bool
-		subagents, busy = claudeSubagents(filepath.Join(home, ".claude"), ap, pn)
+		root := filepath.Join(home, ".claude")
+		if session, ok := liveClaudeSession(root, ap, pn); ok {
+			subagents, busy = claudeSessionSubagents(root, session)
+			checklist, intent = claudeChecklist(root, session)
+		}
 		// Team agents can run while the main prompt is idle. Their
 		// depth-zero metadata lacks completion markers; use the live
 		// session's aggregate status instead of counting old records.
@@ -70,9 +76,8 @@ func collectInteractivePreview(procs *procTable, pn pane, ap proc, home string, 
 			life = LifeWorking
 		}
 	}
-	var checklist []ChecklistItem
 	if tool == "omo" && hasHome {
-		checklist = omoChecklist(filepath.Join(home, ".omo", "agent"), ap, pn.path)
+		checklist, intent = omoChecklist(filepath.Join(home, ".omo", "agent"), ap, pn.path)
 	}
 	return Agent{
 		ID:                 pn.paneID,
@@ -98,5 +103,6 @@ func collectInteractivePreview(procs *procTable, pn pane, ap proc, home string, 
 		NeedsInput:         needsInput,
 		Subagents:          subagents,
 		Checklist:          checklist,
+		Intent:             intent,
 	}
 }

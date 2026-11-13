@@ -34,7 +34,7 @@ session=$2
 shift 2
 case "$session:$1:$2" in
   alpha:api:snapshot)
-    printf '{"result":{"snapshot":{"tabs":[{"tab_id":"w1:t1","label":"review"}],"panes":[{"pane_id":"w1:p1","terminal_id":"term_a","workspace_id":"w1","tab_id":"w1:t1","cwd":"/base","foreground_cwd":"%s","terminal_title":"Agent"},{"pane_id":"w1:p2","cwd":"/shell","agent_status":"working"}]}}}\n' "$HOME"
+    printf '{"result":{"snapshot":{"tabs":[{"tab_id":"w1:t1","label":"review"}],"panes":[{"pane_id":"w1:p1","terminal_id":"term_a","workspace_id":"w1","tab_id":"w1:t1","cwd":"/base","foreground_cwd":"%s","terminal_title":"Agent","agent_session":{"agent":"opencode","kind":"id","value":"%s"}},{"pane_id":"w1:p2","cwd":"/shell","agent_status":"working"}]}}}\n' "$HOME" "$AMUX_HERDR_AGENT_SESSION"
     ;;
   beta:api:snapshot)
     case "$AMUX_HERDR_MODE" in
@@ -43,7 +43,7 @@ case "$session:$1:$2" in
       missing) printf '{}\n'; exit 0 ;;
       paneid) printf '{"result":{"snapshot":{"panes":[{}]}}}\n'; exit 0 ;;
     esac
-    printf '{"result":{"snapshot":{"panes":[{"pane_id":"w1:p1","terminal_id":"term_b","workspace_id":"w1","tab_id":"w1:t2","cwd":"/fallback","terminal_title":"Codex"}]}}}\n'
+    printf '{"result":{"snapshot":{"panes":[{"pane_id":"w1:p1","terminal_id":"term_b","workspace_id":"w1","tab_id":"w1:t2","cwd":"/fallback","terminal_title":"Codex","agent_session":{"agent":"codex","kind":"id","value":"%s"}}]}}}\n' "$AMUX_HERDR_CODEX_SESSION"
     ;;
   alpha:pane:process-info)
     case "$4" in
@@ -109,6 +109,57 @@ func TestCollectHerdrNormalizesAgentsAcrossSessions(t *testing.T) {
 	calls, err := os.ReadFile(filepath.Join(dir, "ps.calls"))
 	if err != nil || string(calls) != "ps\n" {
 		t.Fatalf("one ps per refresh: %q, %v", calls, err)
+	}
+}
+
+func TestCollectHerdrChecklistFollowsSelectedOpenCodeSession(t *testing.T) {
+	home := herdrFixture(t, "")
+	data := filepath.Join(home, "data")
+	t.Setenv("XDG_DATA_HOME", data)
+	for _, id := range []string{"ses_first", "ses_second"} {
+		writeClaudeFixture(t, filepath.Join(data, "opencode", "storage", "todo", id+".json"),
+			`[{"content":"`+id+` task","status":"in_progress"}]`)
+	}
+	for _, id := range []string{"ses_first", "ses_second", ""} {
+		t.Setenv("AMUX_HERDR_AGENT_SESSION", id)
+		snap, err := CollectBackend(time.Now(), BackendHerdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := snap.Agents[0].Checklist
+		if id == "" {
+			if len(got) != 0 {
+				t.Fatalf("missing session borrowed a plan: %#v", got)
+			}
+		} else if len(got) != 1 || got[0].Content != id+" task" || got[0].Status != ChecklistActive {
+			t.Fatalf("selected %s: checklist = %#v", id, got)
+		}
+	}
+}
+
+func TestCollectHerdrChecklistFollowsSelectedCodexSession(t *testing.T) {
+	home := herdrFixture(t, "")
+	root := filepath.Join(home, "codex-data")
+	t.Setenv("CODEX_HOME", root)
+	for _, id := range []string{codexTestSession, codexOtherSession} {
+		log := codexRolloutFixture(t, root, id, id)
+		appendFile(t, log, codexPlanCall(t, "plan", `[{"step":"`+id+`","status":"pending"}]`)+
+			codexPlanResult(t, "plan", "2026-11-13T00:00:02Z", "Plan updated"))
+	}
+	for _, id := range []string{codexTestSession, codexOtherSession, ""} {
+		t.Setenv("AMUX_HERDR_CODEX_SESSION", id)
+		snap, err := CollectBackend(time.Now(), BackendHerdr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := snap.Agents[1].Checklist
+		if id == "" {
+			if len(got) != 0 {
+				t.Fatalf("missing session borrowed a plan: %#v", got)
+			}
+		} else if len(got) != 1 || got[0].Content != id || got[0].Status != ChecklistPending {
+			t.Fatalf("selected %s: checklist = %#v", id, got)
+		}
 	}
 }
 

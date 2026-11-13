@@ -28,9 +28,10 @@ type omoTodoRecord struct {
 	Type      string    `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
 	Message   struct {
-		Role     string `json:"role"`
-		ToolName string `json:"toolName"`
-		IsError  bool   `json:"isError"`
+		Role     string          `json:"role"`
+		ToolName string          `json:"toolName"`
+		IsError  bool            `json:"isError"`
+		Content  json.RawMessage `json:"content"`
 		Details  *struct {
 			Op     string `json:"op"`
 			Phases *[]struct {
@@ -55,9 +56,9 @@ func omoSessionDirName(cwd string) string {
 // omoChecklist returns the latest todo list of the OmO session held by the
 // live process ap. Holders are matched on PID and process start time so a
 // reused PID never borrows another session's plan.
-func omoChecklist(root string, ap proc, cwd string) []ChecklistItem {
+func omoChecklist(root string, ap proc, cwd string) ([]ChecklistItem, string) {
 	if ap.pid <= 0 || ap.startedAt.IsZero() || !filepath.IsAbs(cwd) {
-		return nil
+		return nil, ""
 	}
 	dir := filepath.Join(root, "sessions", omoSessionDirName(cwd))
 	holders, _ := filepath.Glob(filepath.Join(dir, "session-holders", "*", strconv.Itoa(ap.pid)+".json"))
@@ -84,14 +85,15 @@ func omoChecklist(root string, ap proc, cwd string) []ChecklistItem {
 		}
 	}
 	if transcript == "" {
-		return nil
+		return nil, ""
 	}
-	return omoChecklists.read(transcript, time.Now())
+	return omoChecklists.readWithIntent(transcript, time.Now())
 }
 
 type omoChecklistState struct {
 	offset   int64 // bytes of complete lines already applied
 	items    []ChecklistItem
+	intent   string
 	lastUsed time.Time
 }
 
@@ -100,6 +102,8 @@ type omoChecklistState struct {
 type omoChecklistCache struct {
 	mu     sync.Mutex
 	states map[string]*omoChecklistState
+	// Other transcript formats share the incremental reader, not OmO parsing.
+	applyLine func(*omoChecklistState, []byte)
 }
 
 var omoChecklists = &omoChecklistCache{states: map[string]*omoChecklistState{}}
@@ -107,6 +111,11 @@ var omoChecklists = &omoChecklistCache{states: map[string]*omoChecklistState{}}
 const omoChecklistCacheTTL = 10 * time.Minute
 
 func (c *omoChecklistCache) read(path string, now time.Time) []ChecklistItem {
+	items, _ := c.readWithIntent(path, now)
+	return items
+}
+
+func (c *omoChecklistCache) readWithIntent(path string, now time.Time) ([]ChecklistItem, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for p, st := range c.states {
@@ -117,7 +126,7 @@ func (c *omoChecklistCache) read(path string, now time.Time) []ChecklistItem {
 	info, err := os.Stat(path)
 	if err != nil {
 		delete(c.states, path)
-		return nil
+		return nil, ""
 	}
 	st := c.states[path]
 	if st == nil || info.Size() < st.offset {
@@ -126,12 +135,12 @@ func (c *omoChecklistCache) read(path string, now time.Time) []ChecklistItem {
 	}
 	st.lastUsed = now
 	if info.Size() > st.offset {
-		st.consume(path, info.Size())
+		st.consume(path, info.Size(), c.applyLine)
 	}
-	return slices.Clone(st.items)
+	return slices.Clone(st.items), st.intent
 }
 
-func (st *omoChecklistState) consume(path string, size int64) {
+func (st *omoChecklistState) consume(path string, size int64, applyLine func(*omoChecklistState, []byte)) {
 	file, err := os.Open(path)
 	if err != nil {
 		return
@@ -148,7 +157,9 @@ func (st *omoChecklistState) consume(path string, size int64) {
 			return
 		}
 		st.offset += int64(len(line))
-		if bytes.Contains(line, omoTodoMarker) {
+		if applyLine != nil {
+			applyLine(st, line)
+		} else if bytes.Contains(line, omoTodoMarker) || bytes.Contains(line, []byte(`"user"`)) {
 			st.apply(line)
 		}
 	}
@@ -156,8 +167,16 @@ func (st *omoChecklistState) consume(path string, size int64) {
 
 func (st *omoChecklistState) apply(line []byte) {
 	var rec omoTodoRecord
-	if json.Unmarshal(line, &rec) != nil || rec.Type != "message" ||
-		rec.Message.Role != "toolResult" || rec.Message.ToolName != "todo" || rec.Message.IsError ||
+	if json.Unmarshal(line, &rec) != nil || rec.Type != "message" {
+		return
+	}
+	if rec.Message.Role == "user" {
+		if text := requestText(rec.Message.Content); text != "" {
+			st.intent = text
+		}
+		return
+	}
+	if rec.Message.Role != "toolResult" || rec.Message.ToolName != "todo" || rec.Message.IsError ||
 		rec.Message.Details == nil || rec.Message.Details.Phases == nil {
 		return
 	}

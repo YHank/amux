@@ -35,24 +35,36 @@ var claudeProjectEscape = regexp.MustCompile(`[^a-zA-Z0-9-]`)
 var claudeRecordID = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 func claudeSubagents(root string, parent proc, pn pane) ([]Subagent, bool) {
+	session, ok := liveClaudeSession(root, parent, pn)
+	if !ok {
+		return nil, false
+	}
+	return claudeSessionSubagents(root, session)
+}
+
+func liveClaudeSession(root string, parent proc, pn pane) (claudeSession, bool) {
 	var session claudeSession
 	if !readClaudeRecord(filepath.Join(root, "sessions", strconv.Itoa(parent.pid)+".json"), &session) ||
 		session.PID != parent.pid || parent.pid <= 0 ||
 		!claudeRecordID.MatchString(session.SessionID) || !filepath.IsAbs(session.CWD) || pn.paneID == "" {
-		return nil, false
+		return claudeSession{}, false
 	}
 	// Herdr ownership comes from process-info and the exact PID/start time
 	// below; Claude's tmux metadata is absent outside tmux.
 	if pn.backend != BackendHerdr && !strings.HasSuffix(session.Tmux, "."+pn.paneID) {
-		return nil, false
+		return claudeSession{}, false
 	}
 	// ps etime is rounded to seconds. Allow that precision, but reject a stale
 	// session file left behind for a reused PID. File recency is never liveness.
 	start := time.UnixMilli(session.StartedAt)
 	delta := parent.startedAt.Sub(start)
 	if session.StartedAt <= 0 || parent.startedAt.IsZero() || delta < -2*time.Second || delta > 2*time.Second {
-		return nil, false
+		return claudeSession{}, false
 	}
+	return session, true
+}
+
+func claudeSessionSubagents(root string, session claudeSession) ([]Subagent, bool) {
 	busy := session.Status == "busy"
 	project := claudeProjectEscape.ReplaceAllString(session.CWD, "-")
 	dir := filepath.Join(root, "projects", project, session.SessionID, "subagents")
