@@ -1,285 +1,296 @@
-# amux — AI agent tracker for tmux and Herdr
+# amux
 
-**See every AI coding agent you have running — at a glance, in one place.**
+English | [한국어](README.ko.md)
 
-`amux` is a lightweight, fast TUI that unifies two things no other tool shows
-together:
+A terminal dashboard for AI coding agents in **tmux** and **Herdr**, with
+support for live Claude Code and Oh My Pi background daemons.
 
-1. **Interactive agents** — `claude`, `omp` ([Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)),
-   `omo` (OmO, also based on pi), `opencode`, `codex`, `aider`, and `gemini`
-   running in the foreground of any tmux pane, across every session.
-2. **Background agents** — live headless daemons that have **no tmux pane at
-   all** and are otherwise invisible: Claude Code jobs started with the
-   `agents` command, and Oh My Pi's own named background tasks. Persisted
-   records whose owning daemon has exited are not listed.
+See agents by project, check which ones need input, preview their terminals,
+open a pane, send a message, launch another agent, and keep notes about the work.
 
-It's the agent-centric companion to [`lunemis/tap/mux`](https://github.com/lunemis/mux):
-where mux is a tmux *session switcher* with AI badges, amux is an *agent
-dashboard* that also surfaces the headless daemons mux can't see.
+![amux dashboard with project groups, agent states, notes, and a terminal preview](docs/images/dashboard.png)
 
-```
-amux  agent tracker                                          ▶ 4 working  ·  ✓ 25 done
-tmux_agent_check ▶3                          │ ▶ working  claude-cf5d445b:0.0
-❯ ▶ ▤ claude-cf5d445b:0.0            4%cpu    │
-  ▶ ▤ claude_all_-cf5d445b:0.0       4%cpu    │ kind      interactive (tmux pane)
-  ▶ ◇ 82ea9a49              opus[1m] · 1m     │ tool      claude
-english_featfree ▶1                          │ project   /Volumes/SDWORK/git/util/…
-  ▶ ▤ claude-370c3804:0.0            1%cpu    │ pane      claude-cf5d445b:0.0
-                                             │ status
-                                             │ ⠐ claude
-j/k move · enter attach · / filter · d +25 done · r refresh · q quit    updated 12:05:16
-```
+The screenshots use example data rendered by amux's current UI.
 
-`▤` = interactive tmux pane · `◇` = headless background daemon
-`▶` working · `◆` input needed · `●` idle · `⚠` stale · `■` stopped · `✓` done
+## What amux shows
 
-## Why
+| Source | Supported agents | Details |
+| --- | --- | --- |
+| tmux panes | Claude Code, Codex, OmO, Oh My Pi (`omp`), OpenCode, Aider, Gemini | Agents discovered from pane process trees |
+| Herdr panes | The same interactive tools | Agents in running local named sessions |
+| Claude Code background jobs | Jobs in `~/.claude/jobs` | Only records with a live owning daemon |
+| Oh My Pi background tasks | Tasks in `~/.omp/run/daemons` | Only records with a live owning client |
 
-In an AI-heavy workflow you might have Claude working in one pane, a background
-agent committing in another repo, and three more finished jobs you forgot about.
-tmux's `choose-session` only lists names, and the built-in `agents` view is
-per-invocation. amux gives you the **global, cross-session** picture: what's
-working right now, what's waiting on you, and what's done — grouped by project.
+The tmux and Herdr tabs select the interactive backend. Background daemons
+appear in both tabs. Ordinary shells and editors are excluded. `omp` means
+Oh My Pi, not the Oh My Posh shell prompt.
 
-## Features
+The dashboard includes:
 
-- **Both agent kinds, one view** — tmux panes *and* headless daemons
-  (`~/.claude/jobs`, `~/.omp/run/daemons`).
-- **Project grouping** — agents bucket under their git repo root.
-- **Accurate liveness** — background agents are checked against their daemon's
-  live process/socket. Persisted records without a live owner are excluded, so
-  an exited job never looks like a running or input-waiting agent.
-- **Working vs. idle, not just "alive"** — an interactive pane isn't just
-  "live" or not: amux reads each supported tool's live pane indicators
-  (title spinner or bounded content/footer markers), so you can tell a busy
-  agent from one that's alive but sitting at a prompt waiting for you.
-- **Knows when an agent is waiting on *you*** — a distinct `◆ input` state for
-  an agent that has asked a question (including Claude Code AskUserQuestion and
-  OpenCode question prompts) and is blocked on your choice, detected from the
-  pane's actual content rather than guessed from its title.
-- **Working vs. idle, read from the pane** — Claude Code 2.1.237 leaves its
-  `✳ <task>` title in place long after a turn ends, so amux reads the live
-  status row in the pane body (`Doodling… (3m 29s · ↓ 9.7k tokens)`) instead;
-  omp, omo, and OpenCode get the same content-based treatment. Older Claude Code
-  builds that spin their title still work unchanged.
-  OmO's `Working (... • esc to interrupt)` editor border also marks active
-  work when no spinner is shown.
-- **Live preview, in color** — the detail panel shows the selected agent's
-  real terminal output with its own colors intact, refreshed every cycle,
-  mux-style — not just a flat one-line status.
-- **Claude subagents** — the parent row shows `sub:N` for running child
-  agents, and the detail panel lists their tasks and states. Child activity
-  keeps an otherwise idle parent marked as working.
-- **Act at the point of attention** — press `s` to reply directly to an
-  interactive pane. For a live headless Claude job, `Enter` opens Claude's
-  native agent manager. amux never writes to Claude's private daemon state or
-  socket.
-- **Kill or dismiss** — press `x` on an interactive agent, then `y`, to end
-  its tmux pane. Press `x` on a live headless agent to remove it from the
-  current amux dashboard session without touching its daemon.
-- **Attention-first ordering** — grouped view sorts projects and agents by
-  required human action: input, error, stale/unknown, working, idle, then
-  stopped/done. New errors remain visible until acknowledged with `a`;
-  acknowledged errors and completed/stopped agents fold into history
-  (`d` reveals them).
-- **The agent that just changed is on top** — a lifecycle change is the
-  primary sort key in both views, so the moment an agent starts working,
-  finishes, or asks you a question it jumps to the first row and stays there
-  until something else changes. Busy panes redraw constantly; that churn only
-  breaks ties, it never outranks a real transition.
-- **Opens where you left it** — every agent already running when amux starts
-  looks equally fresh to a dashboard that has just launched, so amux restores
-  the order each view last showed instead of picking one and visibly resorting
-  a refresh later. Grouped and flat layouts are remembered separately, and `p`
-  brings each back as you left it.
-- **Edit from a popup** — press `i`, then `t` to rename the selected tmux
-  window (the title displayed after the tool name), or `i` again to edit its note.
-- **Your own notes, local to amux** — press `i` then `i` to jot a short note on any
-  agent (why it's running, what you're waiting on), or `I` to delete its
-  existing note; notes are saved to disk, shown in the list and detail panel,
-  and never written back to tmux/Claude/omp/omo. For a first note on an interactive
-  OMP, OmO, Claude, or Codex pane, amux asks whether to prefill the note from
-  that pane's current tmux title (task name).
-- **Live detail** — model, tokens, CPU, age, and the original task for the
-  selected agent.
-- **Attach or manage in a keystroke** — `Enter` switches to an interactive
-  pane or creates and focuses a dedicated tmux window for a live headless
-  Claude agent manager. Outside tmux, the same action runs in the current terminal.
-- **Statusbar widget** — `amux status` prints the same attention-first summary,
-  for example `◆1 ✖1 ▶2`.
-- **Popup mode** — summon amux as a floating overlay over any session.
+- Project groups or a flat list with project names.
+- Working, input needed, idle, error, stale, unknown, stopped, and done states.
+- A color terminal preview and available task, model, token, CPU, and age details.
+- Claude subagent counts (`sub:N`) and child task details.
+- An OmO plan view with checklist progress, durations, and background tasks.
+- Saved notes, editable window/tab titles, and reusable title presets.
+- Agent launch, message sending, pane navigation, and pane termination.
 
-## Scope
+Status detection uses process information and tool-specific terminal indicators.
+It is an observation of the current screen, not a universal agent API; unfamiliar
+prompts or changed terminal formats can affect classification. Detail fields
+depend on the tool and source.
 
-amux tracks **AI agents**: `claude` and `omp` (interactive and background),
-plus `omo`/`opencode`/`codex`/`aider`/`gemini` when they run interactively in a pane.
-Ordinary shells, editors, and prompt-theme sessions (e.g. an idle `oh-my-posh`
-shell with no agent running in it) are intentionally **not** listed — they're
-environment, not agents. Model/token detail on background agents is currently
-Claude-specific; omp background tasks show name and state only.
+## Requirements and installation
 
-> Note: `omp` here is [Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent),
-> a full coding-agent CLI — unrelated to the `oh-my-posh` shell prompt theme
-> despite the name collision. If your tmux session naming makes that ambiguous,
-> `amux`'s `tool` field in the detail panel always disambiguates.
+- macOS or Linux.
+- Go 1.24 or newer to build.
+- `tmux` for the tmux backend; popup mode requires tmux 3.2 or newer.
+- `herdr` on `PATH` for the Herdr backend; use Herdr 0.9.5 or newer.
+- The agent executables you want to launch on `PATH`.
+- Optional: an installed, authenticated `codex` CLI for generated notes and
+  purpose titles.
 
-## Install
+From a checkout of this repository:
 
-> **Note:** the Go module path (`github.com/kyhan/amux`) is a placeholder. Point
-> it at your own repo before publishing a Homebrew tap.
-
-```bash
-# From source
-git clone <your-repo> amux && cd amux
-make build              # builds ./amux and copies it to ~/.local/bin/amux
-make install            # builds and installs to /usr/local/bin
-
-# Override the automatic build-copy destination
-make build BUILD_INSTALL_PATH="$HOME/.bun/bin/amux"
-
-# Or directly
-go build -o amux ./cmd/amux
+```sh
+make build
 ```
 
-## Usage
+This builds `./amux` with version linker flags and also installs it to
+`~/.local/bin/amux`. Add `~/.local/bin` to your `PATH`, or run `./amux`.
 
-```bash
-amux                    # open the dashboard with the last selected backend
-amux --backend herdr    # select Herdr explicitly (requires herdr 0.9.5+)
-amux --backend tmux     # select tmux explicitly
-amux popup              # floating popup inside tmux or Herdr
-amux status             # compact summary for the selected backend
+```sh
+# Also install to /usr/local/bin (requires write permission there)
+make install
+
+# Choose another install prefix
+make install PREFIX="$HOME/.local"
+```
+
+`make install` runs `make build` first, so it also performs the build's copy to
+`~/.local/bin`. `BUILD_INSTALL_PATH` controls that Makefile copy destination.
+For repository contributors, `AGENTS.md` additionally requires copying every
+successful build to `/Users/ky-han/.local/bin/amux`.
+
+## Quick start
+
+```sh
+amux                         # restore the last selected backend
+amux --backend tmux
+amux --backend herdr
+amux popup --backend tmux     # run inside tmux
+amux popup --backend herdr    # run inside Herdr for a native popup
 amux status --backend tmux --plain
-amux setup-keybind      # bind <prefix> a to the popup (writes ~/.tmux.conf)
 ```
 
-The top tabs select **tmux** or **Herdr**. Press `Tab` or `Shift+Tab` outside
-an input popup to switch. The selection is saved locally in
-`amux/preferences.json` under your platform's user configuration directory
-(`~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config`
-on Linux), and restored on the next launch. Notes and remembered ordering
-remain associated with their backend. Background agents appear in both views.
+Without a saved preference, amux starts with tmux. `Tab` or `Shift+Tab` switches
+backends and saves the selection. An explicit `--backend tmux|herdr` overrides
+the saved choice for that invocation.
 
-Herdr discovery covers running local named sessions. Install Herdr separately
-and keep `herdr` on `PATH`; an unavailable backend is reported in its tab.
-Inside Herdr, `Enter`, then `f` focuses the selected agent's actual workspace,
-tab, and pane. For a popup, use `Enter`, then `p`; `Ctrl+Space`, then `d`
-returns to the dashboard without stopping the agent. Press `q` there to quit.
-Herdr's native `Ctrl+B`, then `q` detach sequence also works; press
-`Ctrl+Space` twice to send a literal `Ctrl+Space` to the agent.
-Native Herdr popups use a locally generated
-`amux.dashboard` plugin, stored beside amux preferences and linked when first
-opened. tmux popup and keybinding setup remain available inside tmux.
+Select an agent with `j` / `k` or the arrow keys. Press `Enter`, then `f` to
+focus/open it, or `Enter`, then `p` to open it in a popup. Use `?` for help.
 
-### Keybindings
+## Dashboard and keyboard controls
+
+The top row selects the backend. The list groups agents by project by default;
+the second panel shows the selected agent's details and terminal output.
+Press `p` for a flat list, `v` to switch between side-by-side and stacked
+panels, or `m` to hide/show the detail panel.
+
+`l` replaces the detail panel with the plan checklist. Pressing the key for the
+currently visible panel hides it; pressing the other key changes its content.
+Backend selection, layout, and separate grouped/flat ordering are saved.
+
+![amux plan panel with completed, running, and pending steps and a background task](docs/images/checklist.png)
+
+The dashboard refreshes every two seconds. Recently observed status changes
+take priority over routine terminal output changes. Completed and stopped agents
+are hidden by default. Errors stay visible until acknowledged with `a`; `d`
+shows or hides this history. Acknowledgments and background-agent dismissals
+last only for the current dashboard session.
+
+These shortcuts apply when no input field or menu is open:
 
 | Key | Action |
-|---|---|
-| `Tab` / `Shift+Tab` | Switch tmux / Herdr tabs and save the selection |
-| `j` / `k` | Move down / up |
-| `J` / `K` | Move to the first visible agent in the next / previous project |
-| `g` / `G` | Jump to first / last |
-| `Enter` | Choose `f` for fullscreen or `p` for a popup; open Claude agents for a live headless session |
-| `s` | Compose a message and send it into an interactive agent's pane |
-| `c` | Choose a project directory or enter a path, then launch claude, codex, omo, omp, or opencode in a new tmux window or Herdr tab |
-| `x` | Kill an interactive pane (then `y` to confirm), or dismiss a headless agent locally |
-| `/` | Filter by tool, name, project, model, path, status detail, or saved note |
-| `i` | Open the edit popup: `t` edits the window/pane title, `i` edits the note; `Ctrl+U` clears the input |
-| `I` | Delete the selected agent's note and set its tmux window title to `stay` |
-| `o` | Set the tmux window title to `start` and open the Codex note popup: `o` generate a note, `m` choose a model |
-| `a` | Acknowledge and fold the selected error for this dashboard session |
-| `d` | Show / hide completed, stopped, and acknowledged-error history |
-| `p` | Toggle project-grouped and flat project-prefixed views; each remembers its own layout and restores it on entry, and both put the latest status change first |
-| `r` | Refresh now |
-| `v` | Toggle the list/detail panes between side-by-side and top/bottom layouts |
-| `m` | Show / hide the detail and terminal-preview pane |
-| `l` | Show / hide the plan checklist (OmO todo list, step status and duration, running background tasks) in the same pane; `m` and `l` swap its content, `v` moves it beside or below the list |
-| `?` | Show keyboard shortcuts; press `?` or `Esc` to close |
-| `q` | Quit |
+| --- | --- |
+| `Tab` / `Shift+Tab` | Switch tmux / Herdr backend |
+| `j` / `k`, `Down` / `Up` | Move selection |
+| `J` / `K` | Next / previous project in grouped view |
+| `g` / `G`, `Home` / `End` | First / last agent |
+| `Enter` | Open the pane menu; for a live Claude background job, open its native agent manager |
+| `s` | Compose and send text to an interactive pane |
+| `c` | Choose a directory and launch an agent |
+| `x` | Ask to kill an interactive pane, or dismiss a background agent locally |
+| `y` | Confirm a pending pane kill |
+| `/` | Filter agents, including their saved notes |
+| `i` then `t` | Edit the window/tab title |
+| `i` then `i` | Edit the note |
+| `I` | Delete the note and set an interactive window/tab title to `stay` |
+| `o` | Set an interactive title to `start` and open the Codex note menu |
+| `a` | Acknowledge the selected error |
+| `d` | Show / hide history |
+| `p` | Switch grouped / flat view |
+| `r` | Refresh immediately |
+| `v` | Switch side-by-side / stacked layout |
+| `m` | Show / hide terminal details |
+| `l` | Show / hide the plan checklist |
+| `Esc` | Invalidate pending note generation for the selected agent |
+| `?` | Open help; `?` or `Esc` closes it |
+| `q` / `Ctrl+C` | Quit |
 
-In tmux, `Enter` → `p` groups the selected project's agent windows into one
-popup session and opens the selected agent first. Use your tmux prefix followed
-by `n` / `p` to switch window tabs, or `w` to choose a window. Agents sharing a
-window keep their existing pane layout in one tab. Detach with your prefix
-followed by `d` to return to amux; the original agent sessions remain running.
+Killing an interactive pane closes that pane. Dismissing a background agent
+only removes it from this dashboard session; its daemon keeps running.
+Oh My Pi background tasks have no attach action.
 
-The `i` → `t` popup keeps the title input above a selectable list. Use `↑` / `↓`
-to choose a title and `Enter` to apply it, or type a custom title. `Tab` replaces
-the input with the closest saved title (exact, prefix, substring, then edit
-distance; ties keep list order). `Ctrl+N` adds the current input to the list;
-`Ctrl+D` deletes the highlighted item. The initial list is `start`, `stay`,
-`review`, `commit`, `gitedit`, `end`. Changes persist in `window-titles.json`
-inside the amux user configuration directory, including an intentionally empty list.
+## Opening agents and returning
 
-### tmux status bar
+### tmux
 
-```tmux
-set -g status-right '#(amux status)'
+`Enter` then `f` selects the original pane, attaching to its session when
+necessary. `Enter` then `p` opens a temporary session that links the selected
+project's agent windows. Panes that share a window keep their existing layout.
+
+Inside the project popup:
+
+- Use your tmux prefix, then `n` / `p`, to change windows.
+- Use your prefix, then `w`, to choose a window.
+- Use your prefix, then `d`, to detach and return to amux.
+
+The original agents stay running. Opening an agent from an existing popup
+reuses that popup instead of nesting a smaller one.
+
+### Herdr
+
+Inside Herdr, `Enter` then `f` focuses the selected agent's actual pane.
+`Enter` then `p` opens the terminal through amux's Herdr popup integration.
+
+In that attached terminal, press `Ctrl+Space`, then `d`, to return to the
+dashboard without stopping the agent. Herdr's `Ctrl+B`, then `q`, also detaches.
+Press `Ctrl+Space` twice to send a literal `Ctrl+Space`.
+
+amux generates and links the local `amux.dashboard` plugin when opening a
+native Herdr popup. If you open a Herdr terminal through a tmux popup instead,
+use Herdr's native detach keys.
+
+## Launching an agent
+
+Press `c`, choose a remembered/project directory with `Up` / `Down` or type a
+path, and press `Enter`. Choose `claude`, `codex`, `omo`, `omp`, or `opencode`,
+then press `Enter` again.
+
+amux creates a tmux window in the selected agent's session, or a Herdr tab in
+the selected workspace. The directory history is saved. Aider and Gemini are
+detected when running, but are not offered by the launch menu.
+
+## Titles and notes
+
+### Title presets
+
+Press `i`, then `t`. Type a title or select a preset with `Up` / `Down`, then
+press `Enter` to apply it.
+
+| Key in the title editor | Action |
+| --- | --- |
+| `Tab` | Replace input with the closest saved title |
+| `Ctrl+N` | Save the current input as a preset |
+| `Ctrl+D` | Delete the highlighted preset |
+| `Ctrl+U` | Clear input |
+| `Esc` | Cancel |
+
+The initial presets are `start`, `stay`, `review`, `commit`, `gitedit`, and
+`end`. Changes persist, including an intentionally empty preset list.
+Titles rename the tmux window or the Herdr tab (pane when no tab is available).
+
+### Notes and Codex generation
+
+Press `i`, then `i`, to edit an agent's note. `Enter` saves, `Ctrl+U` clears the
+input, and `Esc` cancels. Notes appear in the list and detail panel.
+
+For a new interactive note, amux requests a Codex purpose title when the
+available title suggestion is 20 characters or shorter. Longer available
+suggestions open a choice: `y` / `Enter` to prefill, `n` for a blank note, or `o`
+to ask Codex. A failed Codex request returns to the editor with an error and
+the available suggestion.
+
+For generation without keeping the editor open:
+
+1. Press `o` to set the interactive title to `start` and open the Codex menu.
+2. Press `m` to select a model, or `o` again to generate the note.
+3. Continue using or close amux; the detached worker saves its result.
+
+Model choices come from the installed `codex app-server` and are remembered.
+With no saved choice, Codex uses its default. Generation uses captured terminal
+content and currently asks Codex for a **single-line Korean task title**, even
+when following this English guide.
+
+A new request supersedes an older one for that agent. Opening the edit menu,
+deleting the note with `I`, or pressing `Esc` on the selected agent invalidates
+pending generation so a late result cannot replace a manual edit.
+
+## Popup command and tmux integration
+
+```sh
+# Default popup size is 85% by 85%
+amux popup --backend tmux --width 90% --height 90%
+
+# Add or update amux's marked block in ~/.tmux.conf
+amux setup-keybind           # <prefix> a
+amux setup-keybind A         # <prefix> A instead
+tmux source-file ~/.tmux.conf
 ```
 
-## How it works
+`setup-keybind` writes the configuration file; it does not reload tmux for you.
+The generated binding opens the dashboard using its saved backend.
 
-The Herdr tab reads session and pane metadata through the installed CLI,
-captures ANSI output for the same preview and lifecycle detection, and directs
-actions to the captured session and pane IDs. Herdr agent identities include
-their session, so identically numbered panes in different sessions stay separate.
+For a tmux status bar that always reports tmux agents:
 
-Each 2-second refresh does exactly one `ps`, one `tmux list-panes`, one
-`tmux capture-pane` per detected AI-tool pane, and a handful of bounded
-directory scans/globs — no background daemon of its own. Interactive agents
-are found by walking each pane's process tree for an AI-tool foreground
-process; the captured pane content doubles as the live preview and as the
-signal for the `◆ input` state (matched against Claude Code's own
-AskUserQuestion-style choice-prompt footer — verified against a real pending
-prompt, not guessed, though other tools' or dialogs' wording may not be
-caught). Background agents are read straight from each source's own on-disk
-state:
+```tmux
+set -g status-right '#(amux status --backend tmux)'
+```
 
-- Claude Code: `~/.claude/jobs/*/state.json`; liveness from the daemon's
-  `/tmp/cc-daemon-*/*/rv/<id>.sock` rendezvous socket.
-- Oh My Pi: `~/.omp/run/daemons/*/daemons/*/meta.json`; liveness from the
-  owning client's pid in the sibling `clients/*.json` registry.
+`amux status` prints nonzero input, error, stale, unknown, working, and idle
+counts, in that order. `--plain` removes tmux color codes. Omitting `--backend`
+uses the saved backend.
 
-The `c` popup remembers selected project directories in `launch-history.json`
-beside `preferences.json`. Use Up/Down to pick a previous directory, edit the
-path directly (`Ctrl+U` clears it), then press Enter to choose an agent.
-Enter launches it in a new window in the selected agent's tmux session, using
-the same directory and command behavior as the configured prefix + `c` menu.
-Only `claude`, `codex`, `omo`, `omp`, and `opencode` are offered.
+## Local data
 
-Notes you add with `i` then `i` live in their own file (`$XDG_CONFIG_HOME/amux/notes.json`,
-or the platform equivalent via `os.UserConfigDir()`), keyed by agent ID and
-pruned when the tmux pane closes or the background run ends. An existing pane
-keeps its note even if a refresh misses its agent process or a dashboard does
-not recognize its tool; a failed pane scan never clears notes. amux never
-touches any other tool's files.
+amux stores configuration under `amux/` in the platform user configuration
+directory:
 
-The Herdr view uses `herdr-notes.json` in the same directory so older tmux
-dashboards cannot prune its notes. Existing Herdr notes in `notes.json` are
-copied on first use without changing the original file. Notes already deleted
-by an older dashboard must be generated again.
+- macOS: `~/Library/Application Support/amux/`
+- Linux: `$XDG_CONFIG_HOME/amux/`, or `~/.config/amux/`
 
-The note popup queries the installed, logged-in `codex app-server` for available
-models. Select with `j`/`k` and `Enter`; the choice stays in `note-model.json`
-beside `notes.json` until changed, independently of layout preferences.
-Before a choice is saved, Codex uses its default.
+| File | Contents |
+| --- | --- |
+| `preferences.json` | Backend, layout, and remembered list ordering |
+| `notes.json` | tmux-view notes |
+| `herdr-notes.json` | Herdr-view notes |
+| `window-titles.json` | Title presets |
+| `launch-history.json` | Previously selected launch directories |
+| `note-model.json` | Selected Codex model |
+| `herdr-plugin/herdr-plugin.toml` | Generated native Herdr popup plugin |
 
-Generating with `o`, then `o`, starts a detached, one-minute-bounded Codex
-worker. You can navigate, quit with `q`, or close the dashboard; the result is
-saved for the next launch. Repeating the action supersedes older requests for
-that agent, even across dashboards. Entering `i`, deleting with `I`, or pressing
-`Esc` on the selected agent invalidates pending results; cancelling the editor
-does not revive them. Request tokens live beside the active note file with a
-`.requests` suffix and share
-the note store's lock, so stale workers cannot overwrite manual edits.
-This feature requires Codex CLI on `PATH` and its existing login.
+Note generation also maintains request and lock files beside its note store.
+Notes are tied to agent identities and pruned when the corresponding pane/run
+disappears. A missed agent-process detection or a failed pane inventory does
+not by itself delete an existing pane's notes.
 
-## Requirements
+## Development
 
-- tmux (popup mode needs 3.2+)
-- Go 1.24+ to build
-- macOS or Linux
+```sh
+go test ./...
+go vet ./...
+make build
+```
 
-## License
+| Directory | Responsibility |
+| --- | --- |
+| `cmd/amux` | CLI commands, popup/attach actions, worker entrypoints |
+| `internal/collect` | Process, pane, daemon, lifecycle, and checklist collection |
+| `internal/herdr` | Herdr CLI and socket access |
+| `internal/ui` | Dashboard, menus, preferences, and user actions |
+| `internal/notes` | Note persistence and generation coordination |
+| `internal/notegen` | Codex model discovery and note/title generation |
 
-MIT
+Follow the repository's `AGENTS.md` when contributing. Keep this document and
+[the Korean version](README.ko.md) in sync when user-facing behavior changes.
