@@ -1,9 +1,9 @@
 # amux
 
-**Generated:** 2026-07-23 · **Updated:** 2026-10-12
+**Generated:** 2026-07-23 · **Updated:** 2026-11-13
 
 ## Purpose
-`amux` is a Go terminal UI that discovers AI coding agents running in tmux panes and supported headless daemon stores, groups them by project, and provides monitoring and tmux actions.
+`amux` is a Go terminal UI that discovers AI coding agents running in tmux panes and Herdr sessions, plus supported headless daemon stores, groups them by project, and provides monitoring, notes, and tmux/Herdr actions.
 
 ## Key Files
 
@@ -21,8 +21,10 @@
 | Directory | Purpose |
 |-----------|---------|
 | `cmd/` | Cobra CLI entrypoint and subcommands (see `cmd/AGENTS.md`). |
-| `internal/` | Non-public collection, notes, and Bubble Tea UI packages (see `internal/AGENTS.md`). |
+| `internal/` | Non-public collection, Herdr access, notes, note generation, and Bubble Tea UI packages (see `internal/AGENTS.md`). |
 | `.claude/` | Local Claude configuration and repository recovery tooling (see `.claude/AGENTS.md`). |
+
+Git-ignored generated or operational directories are not documented and should not be hand-edited: `graft/` (Trail-Code repo map), `graphify-out/` (graphify knowledge graph), `.zvec-grep/` (search index), `.omc/`, `.omo/`, `.serena/`, `.ovis/`.
 
 ## For AI Agents
 
@@ -44,13 +46,12 @@
 ## Dependencies
 
 ### Internal
-- `cmd/amux` wires CLI commands to `internal/collect` and `internal/ui`; `ui` owns its `internal/notes` integration.
+- `cmd/amux` wires CLI commands to `internal/collect`, `internal/herdr`, `internal/notegen`, and `internal/ui`; `ui` owns its `internal/notes` integration.
 
 ### External
 - `github.com/spf13/cobra` provides CLI parsing.
 - `github.com/charmbracelet/bubbletea` and `github.com/charmbracelet/lipgloss` provide the TUI.
-
-<!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+- Runtime tools on `PATH`: `tmux`, optionally `herdr` (0.9.5+ per README) and `codex` for note/title generation.
 
 ## Manual Notes
 
