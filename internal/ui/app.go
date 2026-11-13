@@ -79,6 +79,7 @@ type Model struct {
 	dismissed              map[string]bool // session-local background dismissals by agent ID
 	stacked                bool            // render the agent list above the detail pane
 	hideDetail             bool            // hide the detail pane so the list fills the viewport
+	showChecklist          bool            // the detail pane shows the selected agent's plan checklist instead of its preview
 	currentDir             string          // launch directory; its project leads the flat view among agents with no remembered position
 	currentProjectKey      string          // deepest visible project containing currentDir
 	startupPaneID          string          // interactive pane to select after the first successful snapshot
@@ -152,6 +153,7 @@ func New() Model {
 		startupPaneID:     startupAgentID(validBackend(prefs.Backend)),
 		stacked:           prefs.Stacked,
 		hideDetail:        prefs.HideDetail,
+		showChecklist:     prefs.ShowChecklist,
 		flatView:          prefs.FlatView,
 		flatOrder:         prefs.FlatOrder,
 		groupedOrder:      prefs.GroupedOrder,
@@ -213,6 +215,7 @@ func (m *Model) persistViewPreferences() {
 		HerdrGroupedOrder: m.herdrGroupedOrder,
 		Stacked:           m.stacked,
 		HideDetail:        m.hideDetail,
+		ShowChecklist:     m.showChecklist,
 		FlatView:          m.flatView,
 		FlatOrder:         m.tmuxFlatOrder,
 		GroupedOrder:      m.tmuxGroupedOrder,
@@ -700,8 +703,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.stacked = !m.stacked
 		m.persistViewPreferences()
 	case "m":
-		m.hideDetail = !m.hideDetail
-		m.persistViewPreferences()
+		m.toggleDetailPanel(false)
+	case "l":
+		m.toggleDetailPanel(true)
 	case "d":
 		m.showDone = !m.showDone
 		m.rebuildRows()

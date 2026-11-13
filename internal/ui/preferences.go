@@ -15,6 +15,7 @@ type viewPreferences struct {
 	HerdrGroupedOrder []string        `json:"herdr_grouped_order,omitempty"`
 	Stacked           bool            `json:"stacked"`
 	HideDetail        bool            `json:"hide_detail"`
+	ShowChecklist     bool            `json:"show_checklist"`
 	FlatView          bool            `json:"flat_view"`
 	// Agent IDs in the order each view last displayed them. Restoring these
 	// lets a fresh dashboard open in the layout the user left rather than the
@@ -34,6 +35,7 @@ func (p viewPreferences) equal(other viewPreferences) bool {
 		slices.Equal(p.HerdrFlatOrder, other.HerdrFlatOrder) &&
 		slices.Equal(p.HerdrGroupedOrder, other.HerdrGroupedOrder) &&
 		p.HideDetail == other.HideDetail &&
+		p.ShowChecklist == other.ShowChecklist &&
 		p.FlatView == other.FlatView &&
 		slices.Equal(p.FlatOrder, other.FlatOrder) &&
 		slices.Equal(p.GroupedOrder, other.GroupedOrder)

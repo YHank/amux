@@ -193,6 +193,7 @@ opened. tmux popup and keybinding setup remain available inside tmux.
 | `r` | Refresh now |
 | `v` | Toggle the list/detail panes between side-by-side and top/bottom layouts |
 | `m` | Show / hide the detail and terminal-preview pane |
+| `l` | Show / hide the plan checklist (OmO todo list, step status and duration, running background tasks) in the same pane; `m` and `l` swap its content, `v` moves it beside or below the list |
 | `?` | Show keyboard shortcuts; press `?` or `Esc` to close |
 | `q` | Quit |
 

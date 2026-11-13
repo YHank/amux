@@ -70,6 +70,10 @@ func collectInteractivePreview(procs *procTable, pn pane, ap proc, home string, 
 			life = LifeWorking
 		}
 	}
+	var checklist []ChecklistItem
+	if tool == "omo" && hasHome {
+		checklist = omoChecklist(filepath.Join(home, ".omo", "agent"), ap, pn.path)
+	}
 	return Agent{
 		ID:                 pn.paneID,
 		Backend:            BackendTmux,
@@ -93,5 +97,6 @@ func collectInteractivePreview(procs *procTable, pn pane, ap proc, home string, 
 		PreviewFingerprint: previewFingerprint(preview),
 		NeedsInput:         needsInput,
 		Subagents:          subagents,
+		Checklist:          checklist,
 	}
 }

@@ -34,6 +34,7 @@ var keyboardHelpEntries = []helpEntry{
 	{"r", "refresh now"},
 	{"v", "toggle side-by-side and stacked layout"},
 	{"m", "show or hide the detail preview"},
+	{"l", "show or hide the plan checklist"},
 	{"q", "quit"},
 }
 
@@ -89,7 +90,7 @@ func (m Model) View() string {
 	}
 	detailW := availableW - listW
 	list := fitPane(m.renderList(listW, bodyH), listW, bodyH)
-	detail := fitPane(m.renderDetail(detailW, bodyH), detailW, bodyH)
+	detail := fitPane(m.renderDetailPanel(detailW, bodyH), detailW, bodyH)
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
 		list,
 		styleDivider.Render(vline(bodyH)),
@@ -101,7 +102,7 @@ func (m Model) View() string {
 func (m Model) renderTooSmall() string {
 	lines := []string{truncateWidth("amux", m.width)}
 	if m.height > 1 {
-		lines = append(lines, truncateWidth("v/m", m.width))
+		lines = append(lines, truncateWidth("v/m/l", m.width))
 	}
 	if m.height > 2 {
 		lines = append(lines, truncateWidth("terminal too small", m.width))
@@ -189,7 +190,7 @@ func (m Model) renderStackedBody(header, footer string, bodyH int) string {
 		listH = bodyH - detailH - 1
 	}
 	list := fitPane(m.renderList(m.width, listH), m.width, listH)
-	detail := fitPane(m.renderDetail(m.width, detailH), m.width, detailH)
+	detail := fitPane(m.renderDetailPanel(m.width, detailH), m.width, detailH)
 	divider := styleDivider.Render(strings.Repeat("─", m.width))
 	return header + "\n" + list + "\n" + divider + "\n" + detail + "\n" + footer
 }

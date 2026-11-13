@@ -63,6 +63,25 @@ type Subagent struct {
 	Life        Lifecycle
 }
 
+// ChecklistStatus is a plan item's state as recorded by the agent's todo tool.
+type ChecklistStatus string
+
+const (
+	ChecklistPending ChecklistStatus = "pending"
+	ChecklistActive  ChecklistStatus = "in_progress"
+	ChecklistDone    ChecklistStatus = "completed"
+	ChecklistDropped ChecklistStatus = "abandoned"
+)
+
+// ChecklistItem is one entry of an interactive agent's current plan.
+type ChecklistItem struct {
+	Phase      string
+	Content    string
+	Status     ChecklistStatus
+	StartedAt  time.Time // first observed in progress; zero when never seen running
+	FinishedAt time.Time // first observed completed or abandoned
+}
+
 // Agent is one AI agent, unified across both sources.
 type Agent struct {
 	ID          string // stable id: sessionId (background) or tmux pane id (interactive)
@@ -97,6 +116,7 @@ type Agent struct {
 	// pane's own content for the choice-prompt UI (interactive).
 	NeedsInput bool
 	Subagents  []Subagent
+	Checklist  []ChecklistItem // latest todo plan of the agent's session, when readable
 
 	// Interactive-only fields.
 	TmuxTarget         string   // "session:win.pane" — attach target
