@@ -10,6 +10,7 @@
 .serena/
 .omo/
 .zvec-grep/
-
+graft/**
+graphify-out/**
 # OS
 .DS_Store
