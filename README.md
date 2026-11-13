@@ -31,7 +31,7 @@ The dashboard includes:
 - Working, input needed, idle, error, stale, unknown, stopped, and done states.
 - A color terminal preview and available task, model, token, CPU, and age details.
 - Claude subagent counts (`sub:N`) and child task details.
-- An OmO plan view with checklist progress, durations, and background tasks.
+- A plan view with checklist progress, durations, and background tasks.
 - Saved notes, editable window/tab titles, and reusable title presets.
 - Agent launch, message sending, pane navigation, and pane termination.
 
@@ -100,6 +100,23 @@ panels, or `m` to hide/show the detail panel.
 `l` replaces the detail panel with the plan checklist. Pressing the key for the
 currently visible panel hides it; pressing the other key changes its content.
 Backend selection, layout, and separate grouped/flat ordering are saved.
+
+Press `o` then `l` to generate a Codex summary in the `l` panel for agents other
+than OmO, using the model selected with `o` → `m`. The panel shows generation
+progress or errors. Summaries stay separate from notes and last for the current
+dashboard session; OmO keeps its native plan. Press `o` then `l` again to update
+the summary. Opening `l` alone never starts a Codex request.
+
+The checklist reads OmO todos and Claude Code's TodoWrite or session task
+records. OpenCode and Codex plans use the current session reported by their
+Herdr integrations; OpenCode's SQLite-backed plans require `sqlite3` on `PATH`.
+Codex plans are read from successful `update_plan` calls in its rollout.
+When no checklist is recorded, the panel shows **Current work**: the latest
+user request, the agent's status, and running background tasks. OpenCode v2
+also supplies its session title. This is an excerpt of recorded work, not an
+AI-generated plan. A recorded checklist always takes priority.
+amux does not guess a session from project activity, so OpenCode/Codex panes
+without current-session metadata cannot supply a checklist or request.
 
 ![amux plan panel with completed, running, and pending steps and a background task](docs/images/checklist.png)
 

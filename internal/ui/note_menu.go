@@ -57,6 +57,10 @@ func (m Model) handleNoteMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if !m.choosingNoteModel {
 		switch msg.String() {
+		case "l":
+			a := m.noteAgent
+			m.closeNoteMenu()
+			return m.fetchChecklistSummary(a)
 		case "o":
 			a := m.noteAgent
 			m.closeNoteMenu()
@@ -99,7 +103,11 @@ func (m Model) renderNoteMenu() string {
 	if model == "" {
 		model = "Codex default"
 	}
-	lines := []string{"Codex note", "o  generate note", "m  choose model", "model: " + model, "esc close"}
+	lines := []string{"Codex note", "o  generate note"}
+	if m.noteAgent.Tool != "omo" && m.noteAgent.Kind == collect.KindInteractive {
+		lines = append(lines, "l  summarize in plan panel")
+	}
+	lines = append(lines, "m  choose model", "model: "+model, "esc close")
 	if m.choosingNoteModel {
 		lines = []string{"Codex models"}
 		switch {

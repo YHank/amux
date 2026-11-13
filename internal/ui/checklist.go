@@ -42,6 +42,22 @@ func (m Model) renderChecklist(w, h int) string {
 	if a == nil {
 		return styleFaint.Render("select an agent")
 	}
+	_, hasSummary := m.checklistSummaries[a.ID]
+	summaryMode := hasSummary && a.Tool != "omo" && a.Kind == collect.KindInteractive
+	if summaryMode {
+		copy := *a
+		copy.Checklist = nil
+		entry, ok := m.checklistSummaries[a.ID]
+		switch {
+		case !ok || entry.cancel != nil:
+			copy.Intent = "Codex is summarizing..."
+		case entry.err != nil:
+			copy.Intent = "Codex failed: " + entry.err.Error() + "\nPress o then l to retry."
+		default:
+			copy.Intent = entry.text
+		}
+		a = &copy
+	}
 	now := time.Now()
 
 	done := 0
@@ -55,11 +71,21 @@ func (m Model) renderChecklist(w, h int) string {
 		blocks = append(blocks, checklistItemBlock(item, w, now))
 	}
 
-	header := styleTitle.Render("Plan")
+	title := "Plan"
+	if len(a.Checklist) == 0 {
+		title = "Current work"
+	}
+	if summaryMode {
+		title = "Codex summary"
+	}
+	header := styleTitle.Render(title)
 	if len(a.Checklist) > 0 {
 		header += "  " + styleMuted.Render(fmt.Sprintf("%d of %d done", done, len(a.Checklist)))
 	}
 	header += "  " + styleFaint.Render(agentRowName(a))
+	if a.Tool != "omo" {
+		header += "  " + styleFaint.Render("o-l summarize")
+	}
 	top := []string{truncateWidth(header, w), ""}
 
 	bottom := []string{"", styleDivider.Render(strings.Repeat("─", w)), styleProj.Render("Background tasks")}
@@ -81,8 +107,32 @@ func (m Model) renderChecklist(w, h int) string {
 	}
 
 	if len(blocks) == 0 {
-		body := []string{styleFaint.Render("no plan recorded for this agent"),
-			styleFaint.Render(truncateWidth("plans are read from OmO todo lists", w))}
+		body := []string{styleMuted.Render("Status: " + string(a.Life)), ""}
+		if a.Intent == "" {
+			body = append(body, styleFaint.Render("no recent request recorded"))
+		} else {
+			label := "Recent request"
+			if summaryMode {
+				label = "Summary"
+			}
+			body = append(body, styleDetailKey.Render(label))
+			for _, line := range strings.Split(wrap(a.Intent, w), "\n") {
+				body = append(body, truncateWidth(line, w))
+			}
+		}
+		available := h - len(top) - len(bottom)
+		if available < 4 {
+			bottom = nil
+			available = h - len(top)
+		}
+		available = max(1, available)
+		if len(body) > available {
+			body = body[:available]
+			body[len(body)-1] = truncateWidth(body[len(body)-1]+" …", w)
+		}
+		for i := range body {
+			body[i] = truncateWidth(body[i], w)
+		}
 		return strings.Join(append(append(top, body...), bottom...), "\n")
 	}
 

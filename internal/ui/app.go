@@ -69,61 +69,63 @@ type Model struct {
 	sel                               int   // index into selectable agent rows
 	selRows                           []int // indices into rows that are selectable (agents)
 
-	filter                 string
-	filtering              bool
-	showDone               bool            // reveal completed, stopped, and dismissed agents
-	flatView               bool            // show a single project-prefixed list instead of grouped project sections
-	flatProjectWidth       int             // display width of the longest visible flat-view project name
-	hidden                 int             // count of agents hidden by the current view
-	acknowledged           map[string]bool // session-local error acknowledgements by agent ID
-	dismissed              map[string]bool // session-local background dismissals by agent ID
-	stacked                bool            // render the agent list above the detail pane
-	hideDetail             bool            // hide the detail pane so the list fills the viewport
-	showChecklist          bool            // the detail pane shows the selected agent's plan checklist instead of its preview
-	currentDir             string          // launch directory; its project leads the flat view among agents with no remembered position
-	currentProjectKey      string          // deepest visible project containing currentDir
-	startupPaneID          string          // interactive pane to select after the first successful snapshot
-	flatOrder              []string        // agent IDs in the order the flat view last displayed them
-	groupedOrder           []string        // agent IDs in the order the grouped view last displayed them
-	rememberedRank         map[string]int  // active view's remembered order, as positions
-	persisted              viewPreferences // last preferences actually written to disk
-	preferencesPath        string
-	notesStore             *notes.Store
-	suggestingNote         bool   // asking whether to prefill a first note from the pane's tmux title
-	suggestedNote          string // pane-title task offered as the note prefill
-	suggestedNoteID        string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
-	fetchingNote           bool
-	noteRequest            uint64
-	noteCancel             context.CancelFunc
-	noteError              string
-	autoTitleRequests      map[uint64]autoTitleRequest
-	autoTitleLatest        map[string]uint64
-	noteLauncher           func(notegen.Request) (func() error, error)
-	showNoteMenu           bool
-	choosingNoteModel      bool
-	noteModels             []notegen.Model
-	noteModelIndex         int
-	modelLoading           bool
-	modelError             string
-	modelRequest           uint64
-	modelCancel            context.CancelFunc
-	naming                 bool   // capturing a note for the selected agent
-	namingAgentID          string // agent that owns the in-progress note
-	noteInput              string
-	composing              bool // capturing a message to send into the selected agent's pane
-	composeInput           string
-	showHelp               bool // show the keyboard-shortcuts popup
-	moveAction             *Action
-	movePopup              bool
-	launchMenu             launchMenuState
-	editMenu               editMenuState
-	helpOffset             int // first visible keyboard-help entry
-	initialRecencyAt       time.Time
-	initialCPU             map[string]float64 // frozen post-startup CPU tie-breakers
-	initialCPUSeeded       bool
-	previewCandidates      map[string]string // one-refresh debounce for pane output changes
-	lastPreviewFingerprint map[string]string // most recent valid pane-output fingerprint
-	notice                 string            // brief, self-clearing status line (e.g. "sent to <pane>")
+	filter                  string
+	filtering               bool
+	showDone                bool            // reveal completed, stopped, and dismissed agents
+	flatView                bool            // show a single project-prefixed list instead of grouped project sections
+	flatProjectWidth        int             // display width of the longest visible flat-view project name
+	hidden                  int             // count of agents hidden by the current view
+	acknowledged            map[string]bool // session-local error acknowledgements by agent ID
+	dismissed               map[string]bool // session-local background dismissals by agent ID
+	stacked                 bool            // render the agent list above the detail pane
+	hideDetail              bool            // hide the detail pane so the list fills the viewport
+	showChecklist           bool            // the detail pane shows the selected agent's plan checklist instead of its preview
+	checklistSummaries      map[string]checklistSummary
+	checklistSummaryRequest uint64
+	currentDir              string          // launch directory; its project leads the flat view among agents with no remembered position
+	currentProjectKey       string          // deepest visible project containing currentDir
+	startupPaneID           string          // interactive pane to select after the first successful snapshot
+	flatOrder               []string        // agent IDs in the order the flat view last displayed them
+	groupedOrder            []string        // agent IDs in the order the grouped view last displayed them
+	rememberedRank          map[string]int  // active view's remembered order, as positions
+	persisted               viewPreferences // last preferences actually written to disk
+	preferencesPath         string
+	notesStore              *notes.Store
+	suggestingNote          bool   // asking whether to prefill a first note from the pane's tmux title
+	suggestedNote           string // pane-title task offered as the note prefill
+	suggestedNoteID         string // agent that supplied suggestedNote; prevents cross-pane saves after refresh
+	fetchingNote            bool
+	noteRequest             uint64
+	noteCancel              context.CancelFunc
+	noteError               string
+	autoTitleRequests       map[uint64]autoTitleRequest
+	autoTitleLatest         map[string]uint64
+	noteLauncher            func(notegen.Request) (func() error, error)
+	showNoteMenu            bool
+	choosingNoteModel       bool
+	noteModels              []notegen.Model
+	noteModelIndex          int
+	modelLoading            bool
+	modelError              string
+	modelRequest            uint64
+	modelCancel             context.CancelFunc
+	naming                  bool   // capturing a note for the selected agent
+	namingAgentID           string // agent that owns the in-progress note
+	noteInput               string
+	composing               bool // capturing a message to send into the selected agent's pane
+	composeInput            string
+	showHelp                bool // show the keyboard-shortcuts popup
+	moveAction              *Action
+	movePopup               bool
+	launchMenu              launchMenuState
+	editMenu                editMenuState
+	helpOffset              int // first visible keyboard-help entry
+	initialRecencyAt        time.Time
+	initialCPU              map[string]float64 // frozen post-startup CPU tie-breakers
+	initialCPUSeeded        bool
+	previewCandidates       map[string]string // one-refresh debounce for pane output changes
+	lastPreviewFingerprint  map[string]string // most recent valid pane-output fingerprint
+	notice                  string            // brief, self-clearing status line (e.g. "sent to <pane>")
 
 	confirmingKill bool // "kill <pane>? y to confirm" — any other key cancels
 	killTarget     string
@@ -356,6 +358,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editMenu = editMenuState{}
 			}
 		}
+		m.pruneChecklistSummaries()
+		return m, nil
+
+	case checklistSummaryMsg:
+		m.applyChecklistSummary(msg)
 		return m, nil
 
 	case purposeTitleMsg:
@@ -423,6 +430,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if after := updated.selectedAgent(); after != nil && (before == nil || before.ID != after.ID) {
 			updated.rememberSelectedLaunchProject()
 		}
+		updated.pruneChecklistSummaries()
 		return updated, cmd
 	}
 	return m, nil

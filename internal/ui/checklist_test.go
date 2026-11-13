@@ -105,7 +105,7 @@ func TestChecklistKeepsActiveItemVisibleWhenTall(t *testing.T) {
 	}
 	empty := Model{snap: projSnap(collect.Agent{ID: "%2", Name: "x", Project: "/p"})}
 	empty.rebuildRows()
-	if !strings.Contains(empty.renderChecklist(60, 14), "no plan recorded") {
-		t.Fatal("agent without a plan should say so")
+	if !strings.Contains(empty.renderChecklist(60, 14), "no recent request recorded") {
+		t.Fatal("agent without a plan or request should say so")
 	}
 }

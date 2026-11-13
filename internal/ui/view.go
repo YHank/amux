@@ -27,7 +27,7 @@ var keyboardHelpEntries = []helpEntry{
 	{"/", "filter agents"},
 	{"i", "edit popup: t window title / i note"},
 	{"I", "delete note and set window title to stay"},
-	{"o", "set title to start; Codex menu: o generate / m model"},
+	{"o", "Codex: o note / l plan summary (except OmO) / m model"},
 	{"a", "acknowledge the selected error"},
 	{"d", "show or hide history"},
 	{"p", "toggle project-grouped and flat views"},
